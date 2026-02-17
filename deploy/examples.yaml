@@ -1,0 +1,42 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: zerofs-rwx
+provisioner: zerofs.csi.k8s.io
+parameters:
+  storageUrl: "s3://your-bucket/zerofs-data"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - vers=4.1
+  - noatime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zerofs-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: zerofs-rwx
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-zerofs
+spec:
+  containers:
+    - name: app
+      image: nginx:alpine
+      command: ["/bin/sh", "-c", "while true; do echo $(date) >> /data/test.txt; sleep 5; done"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: zerofs-pvc

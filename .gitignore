@@ -1,0 +1,6 @@
+bin/
+*.out
+*.test
+*.prof
+.idea/
+.vscode/

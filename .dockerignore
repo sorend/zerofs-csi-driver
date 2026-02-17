@@ -1,0 +1,10 @@
+bin/
+*.out
+*.test
+*.prof
+.git/
+.github/
+.gitignore
+README.md
+Dockerfile
+Makefile
