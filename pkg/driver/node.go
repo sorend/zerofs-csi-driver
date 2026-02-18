@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/zerofs/zerofs-csi-driver/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -53,15 +53,13 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		share = "/"
 	}
 
-	source := fmt.Sprintf("%s:%s", server, share)
+	protocol := zerofs.ProtocolNFS
+	if p, ok := volumeContext["protocol"]; ok {
+		protocol = zerofs.Protocol(p)
+	}
 
 	if err := os.MkdirAll(stagingTargetPath, 0750); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create staging directory: %v", err)
-	}
-
-	mountOptions := []string{"vers=3", "noatime"}
-	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
-		mountOptions = strings.Split(mo, ",")
 	}
 
 	isMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
@@ -73,12 +71,55 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
+	switch protocol {
+	case zerofs.ProtocolNinep:
+		return ns.stageNinepVolume(volumeID, server, port, share, stagingTargetPath, volumeContext)
+	default:
+		return ns.stageNFSVolume(volumeID, server, port, share, stagingTargetPath, volumeContext)
+	}
+}
+
+func (ns *NodeServer) stageNFSVolume(volumeID, server, port, share, stagingTargetPath string, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+	source := fmt.Sprintf("%s:%s", server, share)
+
+	mountOptions := []string{"vers=3", "noatime"}
+	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
+		mountOptions = strings.Split(mo, ",")
+	}
+
 	options := append([]string{}, mountOptions...)
 	if err := ns.mounter.Mount(source, stagingTargetPath, "nfs", options); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to mount NFS volume %s at %s: %v", volumeID, stagingTargetPath, err)
 	}
 
-	klog.V(4).Infof("Successfully staged volume %s at %s", volumeID, stagingTargetPath)
+	klog.V(4).Infof("Successfully staged NFS volume %s at %s", volumeID, stagingTargetPath)
+	return &csi.NodeStageVolumeResponse{}, nil
+}
+
+func (ns *NodeServer) stageNinepVolume(volumeID, server, port, share, stagingTargetPath string, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+	source := server
+	if podIP, ok := volumeContext["podIP"]; ok && podIP != "" {
+		source = podIP
+	} else if serverIP, ok := volumeContext["serverIP"]; ok && serverIP != "" {
+		source = serverIP
+	}
+
+	mountOptions := []string{
+		fmt.Sprintf("trans=tcp"),
+		fmt.Sprintf("port=%s", port),
+		"version=9p2000.L",
+		"msize=65536",
+	}
+	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
+		mountOptions = strings.Split(mo, ",")
+	}
+
+	options := append([]string{}, mountOptions...)
+	if err := ns.mounter.Mount(source, stagingTargetPath, "9p", options); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to mount 9P volume %s at %s: %v", volumeID, stagingTargetPath, err)
+	}
+
+	klog.V(4).Infof("Successfully staged 9P volume %s at %s", volumeID, stagingTargetPath)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
@@ -133,8 +174,8 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create parent directory for target path: %v", err)
+	if err := os.MkdirAll(targetPath, 0750); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create target directory: %v", err)
 	}
 
 	notMnt, err := ns.mounter.IsLikelyNotMountPoint(targetPath)
@@ -287,8 +328,12 @@ func (ns *NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoReque
 	}
 
 	return &csi.NodeGetInfoResponse{
-		NodeId:             nodeID,
-		MaxVolumesPerNode:  1000,
-		AccessibleTopology: &csi.Topology{},
+		NodeId:            nodeID,
+		MaxVolumesPerNode: 1000,
+		AccessibleTopology: &csi.Topology{
+			Segments: map[string]string{
+				"kubernetes.io/hostname": nodeID,
+			},
+		},
 	}, nil
 }

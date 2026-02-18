@@ -85,7 +85,10 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -372,3 +375,25 @@ allowVolumeExpansion: true
 mountOptions:
   - vers=3
   - noatime
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: zerofs-ninep
+  labels:
+    app.kubernetes.io/name: zerofs-csi-driver
+provisioner: zerofs.csi.k8s.io
+parameters:
+  storageUrl: "s3://zerofs-data"
+  awsAccessKeyID: "minioadmin"
+  awsSecretAccessKey: "minioadmin123"
+  awsEndpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
+  awsAllowHTTP: "true"
+  protocol: "ninep"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+mountOptions:
+  - trans=tcp
+  - version=9p2000.L
+  - msize=65536

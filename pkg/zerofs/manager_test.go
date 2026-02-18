@@ -52,17 +52,23 @@ var _ = ginkgo.Describe("Manager", func() {
 	})
 
 	ginkgo.Context("generateConfig", func() {
-		ginkgo.It("should generate valid config with defaults", func() {
-			config := manager.generateConfig("s3://my-bucket/data", nil, nil)
+		ginkgo.It("should generate valid config with defaults for NFS", func() {
+			config := manager.generateConfig("s3://my-bucket/data", ProtocolNFS, nil, nil)
 			gomega.Expect(config).To(gomega.ContainSubstring("s3://my-bucket/data"))
 			gomega.Expect(config).To(gomega.ContainSubstring("0.0.0.0:2049"))
+		})
+
+		ginkgo.It("should generate valid config for 9P protocol", func() {
+			config := manager.generateConfig("s3://my-bucket/data", ProtocolNinep, nil, nil)
+			gomega.Expect(config).To(gomega.ContainSubstring("s3://my-bucket/data"))
+			gomega.Expect(config).To(gomega.ContainSubstring("0.0.0.0:5564"))
 		})
 
 		ginkgo.It("should include encryption password from secrets", func() {
 			secrets := map[string]string{
 				"encryptionPassword": "my-secret-password",
 			}
-			config := manager.generateConfig("s3://my-bucket/data", nil, secrets)
+			config := manager.generateConfig("s3://my-bucket/data", ProtocolNFS, nil, secrets)
 			gomega.Expect(config).To(gomega.ContainSubstring("my-secret-password"))
 		})
 
@@ -71,15 +77,15 @@ var _ = ginkgo.Describe("Manager", func() {
 				"cacheDir":    "/custom/cache",
 				"cacheSizeGB": "20",
 			}
-			config := manager.generateConfig("s3://my-bucket/data", params, nil)
+			config := manager.generateConfig("s3://my-bucket/data", ProtocolNFS, params, nil)
 			gomega.Expect(config).To(gomega.ContainSubstring("/custom/cache"))
 			gomega.Expect(config).To(gomega.ContainSubstring("disk_size_gb = 20"))
 		})
 	})
 
 	ginkgo.Context("buildDeployment", func() {
-		ginkgo.It("should build a valid deployment", func() {
-			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", 1024*1024*1024)
+		ginkgo.It("should build a valid deployment for NFS", func() {
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNFS, "", 1024*1024*1024)
 
 			gomega.Expect(deployment.Name).To(gomega.Equal("zerofs-pvc-12345"))
 			gomega.Expect(deployment.Namespace).To(gomega.Equal("default"))
@@ -89,30 +95,43 @@ var _ = ginkgo.Describe("Manager", func() {
 			container := deployment.Spec.Template.Spec.Containers[0]
 			gomega.Expect(container.Name).To(gomega.Equal("zerofs"))
 			gomega.Expect(container.Image).To(gomega.Equal("zerofs:latest"))
-			gomega.Expect(container.Ports).To(gomega.HaveLen(2))
+			gomega.Expect(container.Ports).To(gomega.HaveLen(1))
+		})
+
+		ginkgo.It("should build a valid deployment for 9P", func() {
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNinep, "", 1024*1024*1024)
+
+			container := deployment.Spec.Template.Spec.Containers[0]
+			gomega.Expect(container.Ports[0].Name).To(gomega.Equal("ninep"))
+			gomega.Expect(container.Ports[0].ContainerPort).To(gomega.Equal(int32(NinepPort)))
+		})
+
+		ginkgo.It("should set nodeName for 9P protocol", func() {
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNinep, "node-1", 1024*1024*1024)
+			gomega.Expect(deployment.Spec.Template.Spec.NodeName).To(gomega.Equal("node-1"))
 		})
 
 		ginkgo.It("should set correct labels on deployment", func() {
-			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", 0)
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNFS, "", 0)
 
 			labels := deployment.Labels
 			gomega.Expect(labels[AppLabel]).To(gomega.Equal("zerofs-server"))
 			gomega.Expect(labels[ComponentLabel]).To(gomega.Equal("server"))
 			gomega.Expect(labels[VolumeLabel]).To(gomega.Equal("pvc-12345"))
+			gomega.Expect(labels[ProtocolLabel]).To(gomega.Equal("nfs"))
 		})
 
 		ginkgo.It("should configure probes", func() {
-			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", 0)
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNFS, "", 0)
 
 			container := deployment.Spec.Template.Spec.Containers[0]
 			gomega.Expect(container.ReadinessProbe).NotTo(gomega.BeNil())
 			gomega.Expect(container.LivenessProbe).NotTo(gomega.BeNil())
-			gomega.Expect(container.ReadinessProbe.HTTPGet.Path).To(gomega.Equal("/healthz"))
-			gomega.Expect(container.LivenessProbe.HTTPGet.Path).To(gomega.Equal("/healthz"))
+			gomega.Expect(container.ReadinessProbe.TCPSocket).NotTo(gomega.BeNil())
 		})
 
 		ginkgo.It("should mount config and data volumes", func() {
-			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", 0)
+			deployment := manager.buildDeployment("zerofs-pvc-12345", "pvc-12345", "zerofs-config-pvc-12345", ProtocolNFS, "", 0)
 
 			container := deployment.Spec.Template.Spec.Containers[0]
 			gomega.Expect(container.VolumeMounts).To(gomega.HaveLen(2))
@@ -127,8 +146,8 @@ var _ = ginkgo.Describe("Manager", func() {
 	})
 
 	ginkgo.Context("buildService", func() {
-		ginkgo.It("should build a valid service", func() {
-			service := manager.buildService("zerofs-pvc-12345", "pvc-12345")
+		ginkgo.It("should build a valid service for NFS", func() {
+			service := manager.buildService("zerofs-pvc-12345", "pvc-12345", ProtocolNFS)
 
 			gomega.Expect(service.Name).To(gomega.Equal("zerofs-pvc-12345"))
 			gomega.Expect(service.Namespace).To(gomega.Equal("default"))
@@ -137,7 +156,7 @@ var _ = ginkgo.Describe("Manager", func() {
 		})
 
 		ginkgo.It("should expose NFS and health ports", func() {
-			service := manager.buildService("zerofs-pvc-12345", "pvc-12345")
+			service := manager.buildService("zerofs-pvc-12345", "pvc-12345", ProtocolNFS)
 
 			ports := make(map[string]int32)
 			for _, p := range service.Spec.Ports {
@@ -147,13 +166,24 @@ var _ = ginkgo.Describe("Manager", func() {
 			gomega.Expect(ports["health"]).To(gomega.Equal(int32(HealthPort)))
 		})
 
+		ginkgo.It("should expose 9P port for ninep protocol", func() {
+			service := manager.buildService("zerofs-pvc-12345", "pvc-12345", ProtocolNinep)
+
+			ports := make(map[string]int32)
+			for _, p := range service.Spec.Ports {
+				ports[p.Name] = p.Port
+			}
+			gomega.Expect(ports["ninep"]).To(gomega.Equal(int32(NinepPort)))
+		})
+
 		ginkgo.It("should set correct labels on service", func() {
-			service := manager.buildService("zerofs-pvc-12345", "pvc-12345")
+			service := manager.buildService("zerofs-pvc-12345", "pvc-12345", ProtocolNFS)
 
 			labels := service.Labels
 			gomega.Expect(labels[AppLabel]).To(gomega.Equal("zerofs-server"))
 			gomega.Expect(labels[ComponentLabel]).To(gomega.Equal("server"))
 			gomega.Expect(labels[VolumeLabel]).To(gomega.Equal("pvc-12345"))
+			gomega.Expect(labels[ProtocolLabel]).To(gomega.Equal("nfs"))
 		})
 	})
 })

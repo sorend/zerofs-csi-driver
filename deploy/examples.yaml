@@ -40,3 +40,48 @@ spec:
     - name: data
       persistentVolumeClaim:
         claimName: zerofs-pvc
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: zerofs-ninep-rwo
+provisioner: zerofs.csi.k8s.io
+parameters:
+  storageUrl: "s3://your-bucket/zerofs-data"
+  protocol: "ninep"
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+mountOptions:
+  - trans=tcp
+  - version=9p2000.L
+  - msize=65536
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zerofs-ninep-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: zerofs-ninep-rwo
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-zerofs-ninep
+spec:
+  containers:
+    - name: app
+      image: nginx:alpine
+      command: ["/bin/sh", "-c", "while true; do echo $(date) >> /data/test.txt; sleep 5; done"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: zerofs-ninep-pvc

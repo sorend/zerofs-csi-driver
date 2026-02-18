@@ -26,7 +26,8 @@ func NewControllerServer(d *Driver) *ControllerServer {
 }
 
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	klog.V(4).Infof("CreateVolume called with req: %+v", req)
+	klog.Infof("CreateVolume called with req: %+v", req)
+	klog.Infof("AccessibilityRequirements: %+v", req.GetAccessibilityRequirements())
 
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume name missing in request")
@@ -49,21 +50,86 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, status.Error(codes.InvalidArgument, "storageUrl parameter is required")
 	}
 
-	if err := cs.manager.CreateZerofsDeployment(ctx, volumeID, storageURL, params, secrets, reqSize); err != nil {
+	protocol := zerofs.ProtocolNFS
+	if p, ok := params["protocol"]; ok {
+		switch zerofs.Protocol(p) {
+		case zerofs.ProtocolNFS:
+			protocol = zerofs.ProtocolNFS
+		case zerofs.ProtocolNinep:
+			protocol = zerofs.ProtocolNinep
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "invalid protocol %q, must be 'nfs' or 'ninep'", p)
+		}
+	}
+
+	if protocol == zerofs.ProtocolNinep {
+		for _, cap := range req.GetVolumeCapabilities() {
+			if cap.GetAccessMode() != nil {
+				mode := cap.GetAccessMode().GetMode()
+				if mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER &&
+					mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY {
+					return nil, status.Error(codes.InvalidArgument, "9P protocol only supports RWO (ReadWriteOnce) access mode")
+				}
+			}
+		}
+	}
+
+	var nodeName string
+	if protocol == zerofs.ProtocolNinep {
+		if req.GetAccessibilityRequirements() != nil {
+			preferred := req.GetAccessibilityRequirements().GetPreferred()
+			if len(preferred) > 0 {
+				for _, seg := range preferred {
+					if seg.GetSegments() != nil {
+						segments := seg.GetSegments()
+						if node, ok := segments[TopologyKeyNode]; ok {
+							nodeName = node
+							break
+						}
+						if node, ok := segments["kubernetes.io/hostname"]; ok {
+							nodeName = node
+							break
+						}
+						if node, ok := segments["topology.kubernetes.io/hostname"]; ok {
+							nodeName = node
+							break
+						}
+					}
+				}
+			}
+		}
+		if nodeName == "" {
+			return nil, status.Error(codes.InvalidArgument, "9P protocol requires WaitForFirstConsumer binding mode to determine node placement")
+		}
+	}
+
+	serviceIP, podIP, err := cs.manager.CreateZerofsDeployment(ctx, volumeID, storageURL, protocol, nodeName, params, secrets, reqSize)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create zerofs deployment: %v", err)
 	}
 
 	serviceName := cs.manager.GetServiceName(volumeID)
+	port := zerofs.NFSPort
+	if protocol == zerofs.ProtocolNinep {
+		port = zerofs.NinepPort
+	}
+
+	volumeContext := map[string]string{
+		"server":   serviceName + "." + cs.driver.options.Namespace + ".svc.cluster.local",
+		"serverIP": serviceIP,
+		"port":     fmt.Sprintf("%d", port),
+		"share":    "/",
+		"protocol": string(protocol),
+	}
+	if podIP != "" {
+		volumeContext["podIP"] = podIP
+	}
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volumeID,
 			CapacityBytes: reqSize,
-			VolumeContext: map[string]string{
-				"server": serviceName + "." + cs.driver.options.Namespace + ".svc.cluster.local",
-				"port":   fmt.Sprintf("%d", zerofs.NFSPort),
-				"share":  "/",
-			},
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }
