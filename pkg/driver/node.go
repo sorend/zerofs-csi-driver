@@ -59,7 +59,7 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Errorf(codes.Internal, "failed to create staging directory: %v", err)
 	}
 
-	mountOptions := []string{"vers=4.1", "noatime"}
+	mountOptions := []string{"vers=3", "noatime"}
 	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
 		mountOptions = strings.Split(mo, ",")
 	}

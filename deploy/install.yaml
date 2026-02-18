@@ -190,7 +190,6 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--probe-timeout=3s"
             - "--http-endpoint=0.0.0.0:9808"
-            - "--health-port=9898"
           env:
             - name: ADDRESS
               value: /csi/csi.sock
@@ -205,39 +204,19 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: zerofs-plugin
-          image: ghcr.io/sorend/zerofs-csi-driver:latest
-          imagePullPolicy: IfNotPresent
+          image: quay.io/sorend/zerofs-csi-driver:latest
+          imagePullPolicy: Always
           args:
+            - controller
             - "--endpoint=$(CSI_ENDPOINT)"
-            - "--nodeid=$(KUBE_NODE_NAME)"
             - "--namespace=zerofs-csi"
-            - "--zerofs-image=ghcr.io/sorend/zerofs-csi-driver:latest"
+            - "--zerofs-image=quay.io/sorend/zerofs-csi-driver:latest"
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: spec.nodeName
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
-          ports:
-            - name: healthz
-              containerPort: 9898
-              protocol: TCP
-            - name: metrics
-              containerPort: 8080
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: healthz
-            initialDelaySeconds: 10
-            timeoutSeconds: 3
-            periodSeconds: 10
-            failureThreshold: 5
           resources:
             limits:
               cpu: 500m
@@ -314,7 +293,6 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--probe-timeout=3s"
             - "--http-endpoint=0.0.0.0:9808"
-            - "--health-port=9898"
           env:
             - name: ADDRESS
               value: /csi/csi.sock
@@ -329,12 +307,12 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: zerofs-plugin
-          image: ghcr.io/sorend/zerofs-csi-driver:latest
-          imagePullPolicy: IfNotPresent
+          image: quay.io/sorend/zerofs-csi-driver:latest
+          imagePullPolicy: Always
           args:
             - node
             - "--endpoint=$(CSI_ENDPOINT)"
-            - "--nodeid=$(KUBE_NODE_NAME)"
+            - "--node-id=$(KUBE_NODE_NAME)"
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
@@ -354,21 +332,6 @@ spec:
             - name: kubelet-dir
               mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
-            - name: pods-mount-dir
-              mountPath: /var/lib/kubelet/pods
-              mountPropagation: Bidirectional
-          ports:
-            - name: healthz
-              containerPort: 9898
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: healthz
-            initialDelaySeconds: 10
-            timeoutSeconds: 3
-            periodSeconds: 10
-            failureThreshold: 5
           resources:
             limits:
               cpu: 500m
@@ -389,10 +352,6 @@ spec:
           hostPath:
             path: /var/lib/kubelet
             type: Directory
-        - name: pods-mount-dir
-          hostPath:
-            path: /var/lib/kubelet/pods
-            type: DirectoryOrCreate
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -402,10 +361,14 @@ metadata:
     app.kubernetes.io/name: zerofs-csi-driver
 provisioner: zerofs.csi.k8s.io
 parameters:
-  storageUrl: "${ZEROFS_STORAGE_URL}"
+  storageUrl: "s3://zerofs-data"
+  awsAccessKeyID: "minioadmin"
+  awsSecretAccessKey: "minioadmin123"
+  awsEndpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
+  awsAllowHTTP: "true"
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
-  - vers=4.1
+  - vers=3
   - noatime

@@ -133,6 +133,12 @@ func (m *Manager) generateConfig(storageURL string, params, secrets map[string]s
 	if secrets != nil {
 		encryptionPassword = secrets["encryptionPassword"]
 	}
+	if encryptionPassword == "" {
+		encryptionPassword = params["encryptionPassword"]
+	}
+	if encryptionPassword == "" {
+		encryptionPassword = "default-zerofs-encryption-key"
+	}
 
 	cacheDir := params["cacheDir"]
 	if cacheDir == "" {
@@ -144,6 +150,29 @@ func (m *Manager) generateConfig(storageURL string, params, secrets map[string]s
 		cacheSizeGB = "10"
 	}
 
+	awsAccessKey := params["awsAccessKeyID"]
+	awsSecretKey := params["awsSecretAccessKey"]
+	awsEndpoint := params["awsEndpoint"]
+	awsAllowHTTP := params["awsAllowHTTP"]
+	if awsAllowHTTP == "" {
+		awsAllowHTTP = "true"
+	}
+
+	awsSection := ""
+	if awsAccessKey != "" && awsSecretKey != "" {
+		awsSection = fmt.Sprintf(`
+[aws]
+access_key_id = "%s"
+secret_access_key = "%s"
+`, awsAccessKey, awsSecretKey)
+		if awsEndpoint != "" {
+			awsSection += fmt.Sprintf(`endpoint = "%s"
+`, awsEndpoint)
+		}
+		awsSection += fmt.Sprintf(`allow_http = "%s"
+`, awsAllowHTTP)
+	}
+
 	config := fmt.Sprintf(`[cache]
 dir = "%s"
 disk_size_gb = %s
@@ -151,13 +180,13 @@ disk_size_gb = %s
 [storage]
 url = "%s"
 encryption_password = "%s"
-
+%s
 [servers.nfs]
 addresses = ["0.0.0.0:2049"]
 
 [servers.rpc]
 addresses = ["0.0.0.0:7000"]
-`, cacheDir, cacheSizeGB, storageURL, encryptionPassword)
+`, cacheDir, cacheSizeGB, storageURL, encryptionPassword, awsSection)
 
 	return config
 }
@@ -193,7 +222,7 @@ func (m *Manager) buildDeployment(name, volumeID, configMapName string, size int
 							Image: m.zerofsImage,
 							Command: []string{
 								"/usr/local/bin/zerofs",
-								"server",
+								"run",
 								"--config",
 								"/etc/zerofs/zerofs.toml",
 							},
@@ -201,11 +230,6 @@ func (m *Manager) buildDeployment(name, volumeID, configMapName string, size int
 								{
 									Name:          "nfs",
 									ContainerPort: NFSPort,
-									Protocol:      corev1.ProtocolTCP,
-								},
-								{
-									Name:          "health",
-									ContainerPort: HealthPort,
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
@@ -222,9 +246,8 @@ func (m *Manager) buildDeployment(name, volumeID, configMapName string, size int
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/healthz",
-										Port: intstr.FromInt(HealthPort),
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(NFSPort),
 									},
 								},
 								InitialDelaySeconds: 5,
@@ -233,9 +256,8 @@ func (m *Manager) buildDeployment(name, volumeID, configMapName string, size int
 							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/healthz",
-										Port: intstr.FromInt(HealthPort),
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(NFSPort),
 									},
 								},
 								InitialDelaySeconds: 10,

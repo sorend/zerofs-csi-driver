@@ -10,9 +10,15 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -extldflags '-static'" -o /zerofs-csi-driver ./cmd/zerofs-csi-driver
 
-FROM alpine:3.20
+FROM debian:trixie-slim
 
-RUN apk add --no-cache ca-certificates nfs-utils e2fsprogs xfsprogs util-linux
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    nfs-common \
+    e2fsprogs \
+    xfsprogs \
+    util-linux \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /zerofs-csi-driver /usr/local/bin/zerofs-csi-driver
 COPY zerofs-linux-amd64-pgo /usr/local/bin/zerofs-linux-amd64
