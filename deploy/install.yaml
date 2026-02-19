@@ -207,13 +207,13 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: zerofs-plugin
-          image: quay.io/sorend/zerofs-csi-driver:latest
+          image: ghcr.io/sorend/zerofs-csi-driver:latest
           imagePullPolicy: Always
           args:
             - controller
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--namespace=zerofs-csi"
-            - "--zerofs-image=quay.io/sorend/zerofs-csi-driver:latest"
+            - "--zerofs-image=ghcr.io/sorend/zerofs-csi-driver:latest"
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
@@ -310,7 +310,7 @@ spec:
               cpu: 10m
               memory: 20Mi
         - name: zerofs-plugin
-          image: quay.io/sorend/zerofs-csi-driver:latest
+          image: ghcr.io/sorend/zerofs-csi-driver:latest
           imagePullPolicy: Always
           args:
             - node

@@ -1,6 +1,6 @@
 .PHONY: all build test clean docker-build docker-push install lint fmt vet
 
-REGISTRY ?= quay.io/sorend
+REGISTRY ?= ghcr.io/sorend
 IMAGE_NAME ?= zerofs-csi-driver
 TAG ?= latest
 LDFLAGS ?= -s -w -extldflags "-static"
