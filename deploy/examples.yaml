@@ -15,7 +15,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: zerofs-rwx
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
   awsSecretName: "zerofs-aws-credentials"
@@ -59,7 +59,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: zerofs-ninep-rwo
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
   awsSecretName: "zerofs-aws-credentials"

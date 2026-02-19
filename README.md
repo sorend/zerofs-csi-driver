@@ -1,3 +1,8 @@
+
+# WORK IN PROGRESS
+
+Totally vibe coded, not for any kind of production alike use, probably not even for test use.
+
 # ZeroFS CSI Driver
 
 A Container Storage Interface (CSI) driver for Kubernetes that provides persistent storage backed by object storage (S3-compatible). ZeroFS CSI Driver enables dynamic provisioning of volumes that can be mounted via NFS (ReadWriteMany) or 9P (ReadWriteOnce) protocols.
@@ -119,7 +124,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: zerofs-nfs
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
   awsSecretName: "zerofs-aws-credentials"
@@ -140,7 +145,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: zerofs-ninep
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
   awsSecretName: "zerofs-aws-credentials"
@@ -221,7 +226,7 @@ zerofs-csi-driver controller [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--driver-name` | CSI driver name | `zerofs.csi.k8s.io` |
+| `--driver-name` | CSI driver name | `zerofs.csi.sorend.github.com` |
 | `--endpoint` | CSI endpoint | `unix:///csi/csi.sock` |
 | `--namespace` | Namespace to run in | `default` |
 | `--kubeconfig` | Path to kubeconfig file | (in-cluster) |
@@ -236,7 +241,7 @@ zerofs-csi-driver node [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--driver-name` | CSI driver name | `zerofs.csi.k8s.io` |
+| `--driver-name` | CSI driver name | `zerofs.csi.sorend.github.com` |
 | `--node-id` | Node ID | (hostname) |
 | `--endpoint` | CSI endpoint | `unix:///csi/csi.sock` |
 

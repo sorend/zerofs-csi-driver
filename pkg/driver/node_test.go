@@ -20,7 +20,7 @@ var _ = ginkgo.Describe("NodeServer", func() {
 
 	ginkgo.BeforeEach(func() {
 		drv = NewDriver(&DriverOptions{
-			DriverName: "zerofs.csi.k8s.io",
+			DriverName: "zerofs.csi.sorend.github.com",
 			NodeID:     "test-node",
 		})
 		ns = NewNodeServer(drv)

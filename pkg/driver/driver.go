@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	DriverName      = "zerofs.csi.k8s.io"
+	DriverName      = "zerofs.csi.sorend.github.com"
 	DriverVersion   = "1.0.0"
-	TopologyKeyNode = "topology.zerofs.csi.k8s.io/node"
+	TopologyKeyNode = "topology.zerofs.csi.sorend.github.com/node"
 )
 
 type Driver struct {

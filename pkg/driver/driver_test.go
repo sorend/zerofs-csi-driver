@@ -24,7 +24,7 @@ var _ = ginkgo.Describe("Driver", func() {
 
 	ginkgo.BeforeEach(func() {
 		opts = &DriverOptions{
-			DriverName:  "zerofs.csi.k8s.io",
+			DriverName:  "zerofs.csi.sorend.github.com",
 			NodeID:      "test-node",
 			Endpoint:    "unix:///tmp/csi-test.sock",
 			Namespace:   "default",
@@ -42,7 +42,7 @@ var _ = ginkgo.Describe("Driver", func() {
 		})
 
 		ginkgo.It("should create a driver with custom name", func() {
-			gomega.Expect(drv.options.DriverName).To(gomega.Equal("zerofs.csi.k8s.io"))
+			gomega.Expect(drv.options.DriverName).To(gomega.Equal("zerofs.csi.sorend.github.com"))
 		})
 
 		ginkgo.It("should initialize all servers", func() {
@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("IdentityServer", func() {
 
 	ginkgo.BeforeEach(func() {
 		drv = NewDriver(&DriverOptions{
-			DriverName: "zerofs.csi.k8s.io",
+			DriverName: "zerofs.csi.sorend.github.com",
 		})
 		ids = NewIdentityServer(drv)
 	})
@@ -77,7 +77,7 @@ var _ = ginkgo.Describe("IdentityServer", func() {
 		ginkgo.It("should return driver info", func() {
 			resp, err := ids.GetPluginInfo(context.Background(), &csi.GetPluginInfoRequest{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(resp.Name).To(gomega.Equal("zerofs.csi.k8s.io"))
+			gomega.Expect(resp.Name).To(gomega.Equal("zerofs.csi.sorend.github.com"))
 			gomega.Expect(resp.VendorVersion).To(gomega.Equal(DriverVersion))
 		})
 
@@ -126,7 +126,7 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 
 	ginkgo.BeforeEach(func() {
 		drv = NewDriver(&DriverOptions{
-			DriverName:  "zerofs.csi.k8s.io",
+			DriverName:  "zerofs.csi.sorend.github.com",
 			Namespace:   "default",
 			WorkDir:     "/tmp/zerofs-csi",
 			ZerofsImage: "zerofs:latest",

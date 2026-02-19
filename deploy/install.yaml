@@ -125,7 +125,7 @@ subjects:
 kind: CSIDriver
 apiVersion: storage.k8s.io/v1
 metadata:
-  name: zerofs.csi.k8s.io
+  name: zerofs.csi.sorend.github.com
   labels:
     app.kubernetes.io/name: zerofs-csi-driver
 spec:
@@ -267,7 +267,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/zerofs.csi.k8s.io/csi.sock
+              value: /var/lib/kubelet/plugins/zerofs.csi.sorend.github.com/csi.sock
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -345,7 +345,7 @@ spec:
       volumes:
         - name: socket-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/zerofs.csi.k8s.io
+            path: /var/lib/kubelet/plugins/zerofs.csi.sorend.github.com
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
@@ -375,7 +375,7 @@ metadata:
   name: zerofs
   labels:
     app.kubernetes.io/name: zerofs-csi-driver
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://zerofs-data"
   awsSecretName: "zerofs-aws-credentials"
@@ -397,7 +397,7 @@ metadata:
   name: zerofs-ninep
   labels:
     app.kubernetes.io/name: zerofs-csi-driver
-provisioner: zerofs.csi.k8s.io
+provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://zerofs-data"
   awsSecretName: "zerofs-aws-credentials"

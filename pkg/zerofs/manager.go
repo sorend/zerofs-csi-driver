@@ -28,8 +28,8 @@ const (
 	DataPath       = "/data"
 	AppLabel       = "app.kubernetes.io/name"
 	ComponentLabel = "app.kubernetes.io/component"
-	VolumeLabel    = "zerofs.csi.k8s.io/volume-id"
-	ProtocolLabel  = "zerofs.csi.k8s.io/protocol"
+	VolumeLabel    = "zerofs.csi.sorend.github.com/volume-id"
+	ProtocolLabel  = "zerofs.csi.sorend.github.com/protocol"
 )
 
 type Protocol string
