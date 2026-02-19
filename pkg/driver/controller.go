@@ -50,6 +50,11 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, status.Error(codes.InvalidArgument, "storageUrl parameter is required")
 	}
 
+	if !strings.HasSuffix(storageURL, "/") {
+		storageURL += "/"
+	}
+	storageURL += "volumes/" + volumeID
+
 	protocol := zerofs.ProtocolNFS
 	if p, ok := params["protocol"]; ok {
 		switch zerofs.Protocol(p) {

@@ -1,6 +1,6 @@
 .PHONY: all build test clean docker-build docker-push install lint fmt vet
 
-REGISTRY ?= ghcr.io/sorend
+REGISTRY ?= quay.io/sorend
 IMAGE_NAME ?= zerofs-csi-driver
 TAG ?= latest
 LDFLAGS ?= -s -w -extldflags "-static"
@@ -35,18 +35,12 @@ fmt:
 vet:
 	go vet ./...
 
-mod-tidy:
-	go mod tidy
-
-mod-download:
-	go mod download
-
 clean:
 	rm -rf bin/
 	rm -f coverage.out coverage.html
 
 docker-build:
-	docker build --build-arg TARGETARCH=$(GOARCH) -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) .
+	docker build -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) .
 
 docker-build-all:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) .
@@ -54,30 +48,28 @@ docker-build-all:
 docker-push:
 	docker push $(REGISTRY)/$(IMAGE_NAME):$(TAG)
 
+docker-build-push:
+	docker buildx build --platform linux/amd64,linux/arm64 -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) --push .
+
 install:
 	kubectl apply -f deploy/install.yaml
 
 uninstall:
 	kubectl delete -f deploy/install.yaml --ignore-not-found
 
-binaries:
-	mkdir -p bin
-	cp zerofs-linux-amd64-pgo bin/zerofs-linux-amd64
-	cp zerofs-linux-arm64-pgo bin/zerofs-linux-arm64
-
 help:
 	@echo "Available targets:"
-	@echo "  build            - Build the CSI driver binary"
-	@echo "  build-all        - Build binaries for all architectures"
-	@echo "  test             - Run unit tests"
-	@echo "  test-coverage    - Run tests with coverage report"
-	@echo "  lint             - Run golangci-lint"
-	@echo "  fmt              - Format Go code"
-	@echo "  vet              - Run go vet"
-	@echo "  clean            - Clean build artifacts"
-	@echo "  docker-build     - Build Docker image"
-	@echo "  docker-build-all - Build multi-arch Docker images"
-	@echo "  docker-push      - Push Docker image to registry"
-	@echo "  install          - Install CSI driver to Kubernetes"
-	@echo "  uninstall        - Uninstall CSI driver from Kubernetes"
-	@echo "  binaries         - Copy zerofs binaries to bin/"
+	@echo "  build             - Build the CSI driver binary"
+	@echo "  build-all         - Build binaries for linux/amd64 and linux/arm64"
+	@echo "  test              - Run unit tests"
+	@echo "  test-coverage     - Run tests with coverage report"
+	@echo "  lint              - Run golangci-lint"
+	@echo "  fmt               - Format Go code"
+	@echo "  vet               - Run go vet"
+	@echo "  clean             - Clean build artifacts"
+	@echo "  docker-build      - Build Docker image for current arch"
+	@echo "  docker-build-all  - Build multi-arch Docker images (amd64, arm64)"
+	@echo "  docker-push       - Push Docker image to registry"
+	@echo "  docker-build-push - Build and push multi-arch Docker image"
+	@echo "  install           - Install CSI driver to Kubernetes"
+	@echo "  uninstall         - Uninstall CSI driver from Kubernetes"

@@ -2,5 +2,6 @@ bin/
 *.out
 *.test
 *.prof
+coverage.html
 .idea/
 .vscode/

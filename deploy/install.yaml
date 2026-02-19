@@ -52,7 +52,7 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
@@ -356,6 +356,19 @@ spec:
             path: /var/lib/kubelet
             type: Directory
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zerofs-aws-credentials
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: zerofs-csi-driver
+    app.kubernetes.io/component: credentials
+type: Opaque
+stringData:
+  awsAccessKeyID: "minioadmin"
+  awsSecretAccessKey: "minioadmin123"
+---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -365,16 +378,18 @@ metadata:
 provisioner: zerofs.csi.k8s.io
 parameters:
   storageUrl: "s3://zerofs-data"
-  awsAccessKeyID: "minioadmin"
-  awsSecretAccessKey: "minioadmin123"
+  awsSecretName: "zerofs-aws-credentials"
   awsEndpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
   awsAllowHTTP: "true"
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 mountOptions:
+  - nolock
   - vers=3
-  - noatime
+  - tcp
+  - port=2049
+  - mountport=2049
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -385,8 +400,7 @@ metadata:
 provisioner: zerofs.csi.k8s.io
 parameters:
   storageUrl: "s3://zerofs-data"
-  awsAccessKeyID: "minioadmin"
-  awsSecretAccessKey: "minioadmin123"
+  awsSecretName: "zerofs-aws-credentials"
   awsEndpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
   awsAllowHTTP: "true"
   protocol: "ninep"

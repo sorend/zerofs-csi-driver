@@ -20,6 +20,7 @@ import (
 const (
 	NFSPort        = 2049
 	NinepPort      = 5564
+	RPCPort        = 7000
 	HealthPort     = 8080
 	ConfigVolume   = "zerofs-config"
 	DataVolume     = "zerofs-data"
@@ -42,7 +43,7 @@ type Manager struct {
 	namespace   string
 	workDir     string
 	zerofsImage string
-	k8sClient   *kubernetes.Clientset
+	k8sClient   kubernetes.Interface
 }
 
 func NewManager(namespace, workDir, zerofsImage string) *Manager {
@@ -53,7 +54,7 @@ func NewManager(namespace, workDir, zerofsImage string) *Manager {
 	}
 }
 
-func (m *Manager) SetClient(client *kubernetes.Clientset) {
+func (m *Manager) SetClient(client kubernetes.Interface) {
 	m.k8sClient = client
 }
 
@@ -65,7 +66,7 @@ func (m *Manager) GetDeploymentName(volumeID string) string {
 	return fmt.Sprintf("zerofs-%s", volumeID)
 }
 
-func (m *Manager) GetConfigMapName(volumeID string) string {
+func (m *Manager) GetSecretName(volumeID string) string {
 	return fmt.Sprintf("zerofs-config-%s", volumeID)
 }
 
@@ -74,12 +75,12 @@ func (m *Manager) CreateZerofsDeployment(ctx context.Context, volumeID, storageU
 
 	deploymentName := m.GetDeploymentName(volumeID)
 	serviceName := m.GetServiceName(volumeID)
-	configMapName := m.GetConfigMapName(volumeID)
+	secretName := m.GetSecretName(volumeID)
 
-	configData := m.generateConfig(storageURL, protocol, params, secrets)
-	configMap := &corev1.ConfigMap{
+	configData := m.generateConfigWithContext(ctx, storageURL, protocol, params, secrets)
+	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      configMapName,
+			Name:      secretName,
 			Namespace: m.namespace,
 			Labels: map[string]string{
 				AppLabel:       "zerofs-server",
@@ -88,17 +89,17 @@ func (m *Manager) CreateZerofsDeployment(ctx context.Context, volumeID, storageU
 				ProtocolLabel:  string(protocol),
 			},
 		},
-		Data: map[string]string{
-			"zerofs.toml": configData,
+		Data: map[string][]byte{
+			"zerofs.toml": []byte(configData),
 		},
 	}
 
-	_, err := m.k8sClient.CoreV1().ConfigMaps(m.namespace).Create(ctx, configMap, metav1.CreateOptions{})
+	_, err := m.k8sClient.CoreV1().Secrets(m.namespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
-		return "", "", fmt.Errorf("failed to create configmap: %w", err)
+		return "", "", fmt.Errorf("failed to create secret: %w", err)
 	}
 
-	deployment := m.buildDeployment(deploymentName, volumeID, configMapName, protocol, nodeName, size)
+	deployment := m.buildDeployment(deploymentName, volumeID, secretName, protocol, nodeName, size)
 	_, err = m.k8sClient.AppsV1().Deployments(m.namespace).Create(ctx, deployment, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return "", "", fmt.Errorf("failed to create deployment: %w", err)
@@ -154,7 +155,7 @@ func (m *Manager) DeleteZerofsDeployment(ctx context.Context, volumeID string) e
 
 	deploymentName := m.GetDeploymentName(volumeID)
 	serviceName := m.GetServiceName(volumeID)
-	configMapName := m.GetConfigMapName(volumeID)
+	secretName := m.GetSecretName(volumeID)
 
 	err := m.k8sClient.CoreV1().Services(m.namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
@@ -166,16 +167,36 @@ func (m *Manager) DeleteZerofsDeployment(ctx context.Context, volumeID string) e
 		return fmt.Errorf("failed to delete deployment: %w", err)
 	}
 
-	err = m.k8sClient.CoreV1().ConfigMaps(m.namespace).Delete(ctx, configMapName, metav1.DeleteOptions{})
+	err = m.k8sClient.CoreV1().Secrets(m.namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete configmap: %w", err)
+		return fmt.Errorf("failed to delete secret: %w", err)
 	}
 
 	klog.V(4).Infof("Successfully deleted ZeroFS deployment for volume %s", volumeID)
 	return nil
 }
 
+func (m *Manager) getAWSCredentialsFromSecret(ctx context.Context, secretName string) (string, string, error) {
+	if m.k8sClient == nil {
+		return "", "", fmt.Errorf("kubernetes client not initialized")
+	}
+	secret, err := m.k8sClient.CoreV1().Secrets(m.namespace).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get secret %s: %w", secretName, err)
+	}
+	accessKey := string(secret.Data["awsAccessKeyID"])
+	secretKey := string(secret.Data["awsSecretAccessKey"])
+	if accessKey == "" || secretKey == "" {
+		return "", "", fmt.Errorf("secret %s must contain awsAccessKeyID and awsSecretAccessKey keys", secretName)
+	}
+	return accessKey, secretKey, nil
+}
+
 func (m *Manager) generateConfig(storageURL string, protocol Protocol, params, secrets map[string]string) string {
+	return m.generateConfigWithContext(context.Background(), storageURL, protocol, params, secrets)
+}
+
+func (m *Manager) generateConfigWithContext(ctx context.Context, storageURL string, protocol Protocol, params, secrets map[string]string) string {
 	encryptionPassword := ""
 	if secrets != nil {
 		encryptionPassword = secrets["encryptionPassword"]
@@ -197,12 +218,24 @@ func (m *Manager) generateConfig(storageURL string, protocol Protocol, params, s
 		cacheSizeGB = "10"
 	}
 
-	awsAccessKey := params["awsAccessKeyID"]
-	awsSecretKey := params["awsSecretAccessKey"]
+	var awsAccessKey, awsSecretKey string
 	awsEndpoint := params["awsEndpoint"]
 	awsAllowHTTP := params["awsAllowHTTP"]
 	if awsAllowHTTP == "" {
 		awsAllowHTTP = "true"
+	}
+
+	if secretName := params["awsSecretName"]; secretName != "" {
+		var err error
+		awsAccessKey, awsSecretKey, err = m.getAWSCredentialsFromSecret(ctx, secretName)
+		if err != nil {
+			klog.Warningf("Failed to get AWS credentials from secret %s: %v, falling back to params", secretName, err)
+			awsAccessKey = params["awsAccessKeyID"]
+			awsSecretKey = params["awsSecretAccessKey"]
+		}
+	} else {
+		awsAccessKey = params["awsAccessKeyID"]
+		awsSecretKey = params["awsSecretAccessKey"]
 	}
 
 	awsSection := ""
@@ -250,7 +283,7 @@ encryption_password = "%s"
 	return config
 }
 
-func (m *Manager) buildDeployment(name, volumeID, configMapName string, protocol Protocol, nodeName string, size int64) *appsv1.Deployment {
+func (m *Manager) buildDeployment(name, volumeID, secretName string, protocol Protocol, nodeName string, size int64) *appsv1.Deployment {
 	labels := map[string]string{
 		AppLabel:       "zerofs-server",
 		ComponentLabel: "server",
@@ -338,10 +371,8 @@ func (m *Manager) buildDeployment(name, volumeID, configMapName string, protocol
 			{
 				Name: ConfigVolume,
 				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: configMapName,
-						},
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: secretName,
 					},
 				},
 			},
@@ -407,6 +438,12 @@ func (m *Manager) buildService(name, volumeID string, protocol Protocol) *corev1
 					Name:       portName,
 					Port:       servicePort,
 					TargetPort: intstr.FromInt(int(servicePort)),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "rpc",
+					Port:       RPCPort,
+					TargetPort: intstr.FromInt(RPCPort),
 					Protocol:   corev1.ProtocolTCP,
 				},
 				{

@@ -80,9 +80,13 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 }
 
 func (ns *NodeServer) stageNFSVolume(volumeID, server, port, share, stagingTargetPath string, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
-	source := fmt.Sprintf("%s:%s", server, share)
+	source := server
+	if serverIP, ok := volumeContext["serverIP"]; ok && serverIP != "" {
+		source = serverIP
+	}
+	source = fmt.Sprintf("%s:%s", source, share)
 
-	mountOptions := []string{"vers=3", "noatime"}
+	mountOptions := []string{"nolock", "vers=3", "tcp", "port=2049", "mountport=2049"}
 	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
 		mountOptions = strings.Split(mo, ",")
 	}
