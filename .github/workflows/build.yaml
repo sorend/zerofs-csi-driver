@@ -46,7 +46,7 @@ jobs:
             LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
             COMMIT_COUNT=$(git rev-list ${LAST_TAG}..HEAD --count 2>/dev/null || echo "0")
             SHORT_SHA=$(git rev-parse --short HEAD)
-            TAG="${LAST_TAG}.post${COMMIT_COUNT}+${SHORT_SHA}"
+            TAG="${LAST_TAG}.post${COMMIT_COUNT}-g${SHORT_SHA}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "Building image with tag: ${TAG}"
