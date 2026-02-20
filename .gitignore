@@ -5,3 +5,4 @@ bin/
 coverage.html
 .idea/
 .vscode/
+/.agent-shell/
