@@ -93,7 +93,7 @@ func (m *Manager) CreateZerofsDeployment(ctx context.Context, volumeID, storageU
 			"zerofs.toml": []byte(configData),
 		},
 	}
-	metadataAnnotations := m.buildVolumeAnnotations(storageURL, protocol, nodeName, size)
+	metadataAnnotations := m.buildVolumeAnnotations(storageURL, protocol, nodeName, size, params)
 	m.mergeMetadata(&secret.ObjectMeta, secret.Labels, metadataAnnotations)
 
 	if err := m.upsertSecret(ctx, secret); err != nil {
@@ -230,13 +230,8 @@ func (m *Manager) generateConfigWithContext(ctx context.Context, storageURL stri
 		var err error
 		awsAccessKey, awsSecretKey, err = m.getAWSCredentialsFromSecret(ctx, secretName)
 		if err != nil {
-			klog.Warningf("Failed to get AWS credentials from secret %s: %v, falling back to params", secretName, err)
-			awsAccessKey = params["awsAccessKeyID"]
-			awsSecretKey = params["awsSecretAccessKey"]
+			klog.Warningf("Failed to get AWS credentials from secret %s: %v", secretName, err)
 		}
-	} else {
-		awsAccessKey = params["awsAccessKeyID"]
-		awsSecretKey = params["awsSecretAccessKey"]
 	}
 
 	awsSection := ""

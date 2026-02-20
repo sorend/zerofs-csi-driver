@@ -37,6 +37,10 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	volumeID := req.GetName()
 	params := req.GetParameters()
 	secrets := req.GetSecrets()
+	params = mergeMapCopy(params)
+	cs.applyPVCOverrides(ctx, params)
+	cs.warnIfCredentialsProvided(params)
+	params = filterDisallowedParams(params)
 
 	reqSize := int64(0)
 	if req.GetCapacityRange() != nil {
@@ -162,6 +166,78 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 			VolumeContext: volumeContext,
 		},
 	}, nil
+}
+
+func (cs *ControllerServer) applyPVCOverrides(ctx context.Context, params map[string]string) {
+	pvcName := params["csi.storage.k8s.io/pvc/name"]
+	pvcNamespace := params["csi.storage.k8s.io/pvc/namespace"]
+	if pvcName == "" || pvcNamespace == "" {
+		return
+	}
+	manager := cs.manager
+	if manager == nil {
+		return
+	}
+	annotations, err := manager.GetPVCAnnotations(ctx, pvcNamespace, pvcName)
+	if err != nil {
+		klog.Warningf("Failed to read PVC annotations for %s/%s: %v", pvcNamespace, pvcName, err)
+		return
+	}
+	for paramKey, annotationKey := range pvcOverrideableParams() {
+		annotationValue, ok := annotations[annotationKey]
+		if !ok || annotationValue == "" {
+			continue
+		}
+		params[paramKey] = annotationValue
+	}
+}
+
+func pvcOverrideableParams() map[string]string {
+	return map[string]string{
+		"storageUrl":    zerofs.AnnotationStorageURL,
+		"awsEndpoint":   zerofs.AnnotationAWSEndpoint,
+		"awsAllowHTTP":  zerofs.AnnotationAWSAllowHTTP,
+		"awsSecretName": zerofs.AnnotationAWSSecretName,
+	}
+}
+
+func filterDisallowedParams(params map[string]string) map[string]string {
+	if params == nil {
+		return map[string]string{}
+	}
+	filtered := make(map[string]string, len(params))
+	for key, value := range params {
+		switch key {
+		case "awsAccessKeyID", "awsSecretAccessKey":
+			continue
+		default:
+			filtered[key] = value
+		}
+	}
+	return filtered
+}
+
+func (cs *ControllerServer) warnIfCredentialsProvided(params map[string]string) {
+	if params == nil {
+		return
+	}
+	if _, ok := params["awsAccessKeyID"]; ok {
+		klog.Warning("awsAccessKeyID parameter is ignored; use awsSecretName instead")
+	}
+	if _, ok := params["awsSecretAccessKey"]; ok {
+		klog.Warning("awsSecretAccessKey parameter is ignored; use awsSecretName instead")
+	}
+}
+
+func mergeMapCopy(input map[string]string) map[string]string {
+	if input == nil {
+		return map[string]string{}
+	}
+	copy := make(map[string]string, len(input))
+	for key, value := range input {
+		copy[key] = value
+	}
+	return copy
 }
 
 func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {

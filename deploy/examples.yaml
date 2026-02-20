@@ -30,6 +30,28 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: zerofs-pvc
+  annotations:
+    zerofs.csi.sorend.github.com/storage-url: "s3://per-pvc-bucket/zerofs-data"
+    zerofs.csi.sorend.github.com/aws-secret-name: "zerofs-aws-credentials"
+    zerofs.csi.sorend.github.com/aws-endpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
+    zerofs.csi.sorend.github.com/aws-allow-http: "true"
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: zerofs-rwx
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zerofs-pvc-alt-bucket
+  annotations:
+    zerofs.csi.sorend.github.com/storage-url: "s3://another-bucket/zerofs-data"
+    zerofs.csi.sorend.github.com/aws-secret-name: "zerofs-aws-credentials"
+    zerofs.csi.sorend.github.com/aws-endpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
+    zerofs.csi.sorend.github.com/aws-allow-http: "true"
 spec:
   accessModes:
     - ReadWriteMany

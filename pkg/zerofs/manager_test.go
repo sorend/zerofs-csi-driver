@@ -85,16 +85,16 @@ var _ = ginkgo.Describe("Manager", func() {
 			gomega.Expect(config).To(gomega.ContainSubstring("disk_size_gb = 20"))
 		})
 
-		ginkgo.It("should include AWS credentials from params", func() {
+		ginkgo.It("should not include AWS credentials from params", func() {
 			params := map[string]string{
 				"awsAccessKeyID":     "test-access-key",
 				"awsSecretAccessKey": "test-secret-key",
 				"awsEndpoint":        "http://minio:9000",
 			}
 			config := manager.generateConfig("s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).To(gomega.ContainSubstring("test-access-key"))
-			gomega.Expect(config).To(gomega.ContainSubstring("test-secret-key"))
-			gomega.Expect(config).To(gomega.ContainSubstring("http://minio:9000"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("test-access-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("test-secret-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("http://minio:9000"))
 		})
 
 		ginkgo.It("should fetch AWS credentials from secret when awsSecretName is specified", func() {
@@ -121,7 +121,7 @@ var _ = ginkgo.Describe("Manager", func() {
 			gomega.Expect(config).To(gomega.ContainSubstring("secret-secret-key"))
 		})
 
-		ginkgo.It("should fallback to params when secret fetch fails", func() {
+		ginkgo.It("should not include credentials when secret fetch fails", func() {
 			fakeClient := fake.NewSimpleClientset()
 			manager.SetClient(fakeClient)
 
@@ -131,8 +131,25 @@ var _ = ginkgo.Describe("Manager", func() {
 				"awsSecretAccessKey": "fallback-secret-key",
 			}
 			config := manager.generateConfigWithContext(context.Background(), "s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).To(gomega.ContainSubstring("fallback-access-key"))
-			gomega.Expect(config).To(gomega.ContainSubstring("fallback-secret-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("fallback-access-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("fallback-secret-key"))
+		})
+
+		ginkgo.It("should include effective AWS annotations", func() {
+			params := map[string]string{
+				"awsEndpoint":   "http://minio:9000",
+				"awsAllowHTTP":  "false",
+				"awsSecretName": "aws-credentials",
+			}
+			annotations := manager.buildVolumeAnnotations("s3://my-bucket/data", ProtocolNFS, "", 1024, params)
+			gomega.Expect(annotations[AnnotationAWSEndpoint]).To(gomega.Equal("http://minio:9000"))
+			gomega.Expect(annotations[AnnotationAWSAllowHTTP]).To(gomega.Equal("false"))
+			gomega.Expect(annotations[AnnotationAWSSecretName]).To(gomega.Equal("aws-credentials"))
+		})
+
+		ginkgo.It("should default awsAllowHTTP annotation when missing", func() {
+			annotations := manager.buildVolumeAnnotations("s3://my-bucket/data", ProtocolNFS, "", 1024, map[string]string{})
+			gomega.Expect(annotations[AnnotationAWSAllowHTTP]).To(gomega.Equal("true"))
 		})
 
 		ginkgo.It("should prefer secret over params for AWS credentials", func() {
@@ -160,6 +177,16 @@ var _ = ginkgo.Describe("Manager", func() {
 			gomega.Expect(config).To(gomega.ContainSubstring("from-secret-key"))
 			gomega.Expect(config).To(gomega.ContainSubstring("from-secret-value"))
 			gomega.Expect(config).NotTo(gomega.ContainSubstring("from-param-key"))
+		})
+
+		ginkgo.It("should not use param credentials without secret", func() {
+			params := map[string]string{
+				"awsAccessKeyID":     "param-access-key",
+				"awsSecretAccessKey": "param-secret-key",
+			}
+			config := manager.generateConfigWithContext(context.Background(), "s3://my-bucket/data", ProtocolNFS, params, nil)
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("param-access-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("param-secret-key"))
 		})
 	})
 

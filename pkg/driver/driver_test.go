@@ -10,6 +10,8 @@ import (
 	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -181,6 +183,108 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			st, ok := status.FromError(err)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
+		})
+
+		ginkgo.It("should allow pvc annotations to override storageUrl", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			cs.driver.options.Namespace = "default"
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+					Annotations: map[string]string{
+						zerofs.AnnotationStorageURL: "s3://override-bucket/data",
+					},
+				},
+			}
+			_, err := fakeClient.CoreV1().PersistentVolumeClaims("default").Create(context.Background(), pvc, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			_, err = cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+				Name: "test-volume",
+				Parameters: map[string]string{
+					"storageUrl":                       "s3://base-bucket/data",
+					"csi.storage.k8s.io/pvc/name":      "test-pvc",
+					"csi.storage.k8s.io/pvc/namespace": "default",
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			metadata, err := cs.manager.GetVolumeMetadata(context.Background(), "test-volume")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(metadata.StorageURL).To(gomega.Equal("s3://override-bucket/data/volumes/test-volume"))
+		})
+
+		ginkgo.It("should ignore inline access key parameters", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			cs.driver.options.Namespace = "default"
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+					Annotations: map[string]string{
+						zerofs.AnnotationStorageURL: "s3://base-bucket/data",
+					},
+				},
+			}
+			_, err := fakeClient.CoreV1().PersistentVolumeClaims("default").Create(context.Background(), pvc, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "zerofs-aws-credentials",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"awsAccessKeyID":     []byte("secret-access-key"),
+					"awsSecretAccessKey": []byte("secret-secret-key"),
+				},
+			}
+			_, err = fakeClient.CoreV1().Secrets("default").Create(context.Background(), secret, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			_, err = cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+				Name: "test-volume-keys",
+				Parameters: map[string]string{
+					"storageUrl":                       "s3://base-bucket/data",
+					"csi.storage.k8s.io/pvc/name":      "test-pvc",
+					"csi.storage.k8s.io/pvc/namespace": "default",
+					"awsSecretName":                    "zerofs-aws-credentials",
+					"awsAccessKeyID":                   "param-access-key",
+					"awsSecretAccessKey":               "param-secret-key",
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			secretName := cs.manager.GetSecretName("test-volume-keys")
+			createdSecret, err := fakeClient.CoreV1().Secrets("default").Get(context.Background(), secretName, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			configData := string(createdSecret.Data["zerofs.toml"])
+			gomega.Expect(configData).To(gomega.ContainSubstring("secret-access-key"))
+			gomega.Expect(configData).To(gomega.ContainSubstring("secret-secret-key"))
+			gomega.Expect(configData).NotTo(gomega.ContainSubstring("param-access-key"))
+			gomega.Expect(configData).NotTo(gomega.ContainSubstring("param-secret-key"))
 		})
 	})
 

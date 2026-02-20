@@ -168,6 +168,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: zerofs-pvc
+  annotations:
+    zerofs.csi.sorend.github.com/storage-url: "s3://per-pvc-bucket/zerofs-data"
+    zerofs.csi.sorend.github.com/aws-secret-name: "zerofs-aws-credentials"
+    zerofs.csi.sorend.github.com/aws-endpoint: "http://minio.zerofs-csi.svc.cluster.local:9000"
+    zerofs.csi.sorend.github.com/aws-allow-http: "true"
 spec:
   accessModes:
     - ReadWriteMany
@@ -205,8 +210,8 @@ spec:
 |-----------|-------------|---------|----------|
 | `storageUrl` | S3 URL for backing storage (e.g., `s3://bucket/path`) | - | Yes |
 | `awsSecretName` | Kubernetes secret containing AWS credentials | - | Yes* |
-| `awsAccessKeyID` | AWS access key ID (if not using secret) | - | No |
-| `awsSecretAccessKey` | AWS secret access key (if not using secret) | - | No |
+| `awsAccessKeyID` | AWS access key ID (ignored; use secret) | - | No |
+| `awsSecretAccessKey` | AWS secret access key (ignored; use secret) | - | No |
 | `awsEndpoint` | Custom S3 endpoint URL | - | No |
 | `awsAllowHTTP` | Allow HTTP connections (for non-HTTPS endpoints) | `true` | No |
 | `protocol` | Mount protocol: `nfs` or `ninep` | `nfs` | No |
@@ -214,7 +219,20 @@ spec:
 | `cacheDir` | Directory for local cache | `/var/lib/zerofs/cache` | No |
 | `cacheSizeGB` | Maximum cache size in GB | `10` | No |
 
-*Either `awsSecretName` or both `awsAccessKeyID` and `awsSecretAccessKey` must be provided.
+*Prefer `awsSecretName` for credentials. Direct `awsAccessKeyID`/`awsSecretAccessKey` parameters are ignored by the driver.
+
+### PVC Annotation Overrides
+
+PVCs can override select StorageClass parameters using the same `zerofs.csi.sorend.github.com/` prefix. Only `awsSecretName` is allowed for credentials; raw access keys are ignored.
+
+| PVC Annotation | Maps to Parameter | Notes |
+|---------------|-------------------|-------|
+| `zerofs.csi.sorend.github.com/storage-url` | `storageUrl` | Required when overriding bucket/path |
+| `zerofs.csi.sorend.github.com/aws-secret-name` | `awsSecretName` | Use a Secret for credentials |
+| `zerofs.csi.sorend.github.com/aws-endpoint` | `awsEndpoint` | Optional |
+| `zerofs.csi.sorend.github.com/aws-allow-http` | `awsAllowHTTP` | Optional, defaults to `true` |
+
+The driver stores the effective S3 parameters on the ZeroFS deployment and secret annotations for debugging.
 
 ### CLI Flags
 

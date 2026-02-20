@@ -13,10 +13,13 @@ import (
 )
 
 const (
-	AnnotationStorageURL = "zerofs.csi.sorend.github.com/storage-url"
-	AnnotationCapacity   = "zerofs.csi.sorend.github.com/capacity-bytes"
-	AnnotationNodeName   = "zerofs.csi.sorend.github.com/node-name"
-	AnnotationProtocol   = "zerofs.csi.sorend.github.com/protocol"
+	AnnotationStorageURL    = "zerofs.csi.sorend.github.com/storage-url"
+	AnnotationCapacity      = "zerofs.csi.sorend.github.com/capacity-bytes"
+	AnnotationNodeName      = "zerofs.csi.sorend.github.com/node-name"
+	AnnotationProtocol      = "zerofs.csi.sorend.github.com/protocol"
+	AnnotationAWSEndpoint   = "zerofs.csi.sorend.github.com/aws-endpoint"
+	AnnotationAWSAllowHTTP  = "zerofs.csi.sorend.github.com/aws-allow-http"
+	AnnotationAWSSecretName = "zerofs.csi.sorend.github.com/aws-secret-name"
 )
 
 type VolumeMetadata struct {
@@ -29,7 +32,7 @@ type VolumeMetadata struct {
 	ServerName    string
 }
 
-func (m *Manager) buildVolumeAnnotations(storageURL string, protocol Protocol, nodeName string, size int64) map[string]string {
+func (m *Manager) buildVolumeAnnotations(storageURL string, protocol Protocol, nodeName string, size int64, params map[string]string) map[string]string {
 	annotations := map[string]string{}
 	if storageURL != "" {
 		annotations[AnnotationStorageURL] = storageURL
@@ -39,7 +42,34 @@ func (m *Manager) buildVolumeAnnotations(storageURL string, protocol Protocol, n
 	if nodeName != "" {
 		annotations[AnnotationNodeName] = nodeName
 	}
+	if params != nil {
+		if awsEndpoint := params["awsEndpoint"]; awsEndpoint != "" {
+			annotations[AnnotationAWSEndpoint] = awsEndpoint
+		}
+		awsAllowHTTP := params["awsAllowHTTP"]
+		if awsAllowHTTP == "" {
+			awsAllowHTTP = "true"
+		}
+		annotations[AnnotationAWSAllowHTTP] = awsAllowHTTP
+		if awsSecretName := params["awsSecretName"]; awsSecretName != "" {
+			annotations[AnnotationAWSSecretName] = awsSecretName
+		}
+	}
 	return annotations
+}
+
+func (m *Manager) GetPVCAnnotations(ctx context.Context, namespace, name string) (map[string]string, error) {
+	if m.k8sClient == nil {
+		return nil, fmt.Errorf("kubernetes client not initialized")
+	}
+	pvc, err := m.k8sClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if pvc.Annotations == nil {
+		return map[string]string{}, nil
+	}
+	return pvc.Annotations, nil
 }
 
 func (m *Manager) mergeMetadata(meta *metav1.ObjectMeta, labels, annotations map[string]string) {
