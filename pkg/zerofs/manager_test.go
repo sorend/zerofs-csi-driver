@@ -22,14 +22,14 @@ var _ = ginkgo.Describe("Manager", func() {
 	)
 
 	ginkgo.BeforeEach(func() {
-		manager = NewManager("default", "/var/lib/zerofs-csi", "zerofs:latest")
+		manager = NewManager("default", "/var/lib/zerofs-csi", "ghcr.io/barre/zerofs:1.0.4")
 	})
 
 	ginkgo.Context("NewManager", func() {
 		ginkgo.It("should create a manager with correct settings", func() {
 			gomega.Expect(manager.namespace).To(gomega.Equal("default"))
 			gomega.Expect(manager.workDir).To(gomega.Equal("/var/lib/zerofs-csi"))
-			gomega.Expect(manager.zerofsImage).To(gomega.Equal("zerofs:latest"))
+			gomega.Expect(manager.zerofsImage).To(gomega.Equal("ghcr.io/barre/zerofs:1.0.4"))
 		})
 	})
 
@@ -174,7 +174,7 @@ var _ = ginkgo.Describe("Manager", func() {
 
 			container := deployment.Spec.Template.Spec.Containers[0]
 			gomega.Expect(container.Name).To(gomega.Equal("zerofs"))
-			gomega.Expect(container.Image).To(gomega.Equal("zerofs:latest"))
+			gomega.Expect(container.Image).To(gomega.Equal("ghcr.io/barre/zerofs:1.0.4"))
 			gomega.Expect(container.Ports).To(gomega.HaveLen(1))
 		})
 

@@ -4,7 +4,7 @@ metadata:
   name: zerofs-aws-credentials
   namespace: zerofs-csi
   labels:
-    app.kubernetes.io/name: zerofs-csi-driver
+    app.kubernetes.io/name: csi-driver-zerofs
     app.kubernetes.io/component: credentials
 type: Opaque
 stringData:

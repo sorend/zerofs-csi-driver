@@ -3,10 +3,11 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/zerofs-csi-driver/pkg/zerofs"
+	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -31,9 +32,6 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume name missing in request")
-	}
-	if len(req.GetVolumeCapabilities()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume capabilities missing in request")
 	}
 
 	volumeID := req.GetName()
@@ -67,16 +65,43 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		}
 	}
 
-	if protocol == zerofs.ProtocolNinep {
-		for _, cap := range req.GetVolumeCapabilities() {
-			if cap.GetAccessMode() != nil {
-				mode := cap.GetAccessMode().GetMode()
-				if mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER &&
-					mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY {
-					return nil, status.Error(codes.InvalidArgument, "9P protocol only supports RWO (ReadWriteOnce) access mode")
-				}
-			}
+	if err := validateVolumeCapabilities(req.GetVolumeCapabilities(), protocol); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	if existing, err := cs.manager.GetVolumeMetadata(ctx, volumeID); err == nil {
+		if existing.StorageURL != "" && existing.StorageURL != storageURL {
+			return nil, status.Errorf(codes.AlreadyExists, "volume %s already exists with different storage URL", volumeID)
 		}
+		if existing.Protocol != "" && existing.Protocol != protocol {
+			return nil, status.Errorf(codes.AlreadyExists, "volume %s already exists with different protocol", volumeID)
+		}
+		if existing.CapacityBytes > 0 && reqSize > existing.CapacityBytes {
+			return nil, status.Errorf(codes.AlreadyExists, "volume %s already exists with smaller capacity", volumeID)
+		}
+
+		port := zerofs.NFSPort
+		if protocol == zerofs.ProtocolNinep {
+			port = zerofs.NinepPort
+		}
+		volumeContext := map[string]string{
+			"server":   existing.ServerName,
+			"serverIP": existing.ServiceIP,
+			"port":     fmt.Sprintf("%d", port),
+			"share":    "/",
+			"protocol": string(protocol),
+		}
+		if existing.ServiceIP == "" {
+			delete(volumeContext, "serverIP")
+		}
+
+		return &csi.CreateVolumeResponse{
+			Volume: &csi.Volume{
+				VolumeId:      volumeID,
+				CapacityBytes: existing.CapacityBytes,
+				VolumeContext: volumeContext,
+			},
+		}, nil
 	}
 
 	var nodeName string
@@ -177,18 +202,17 @@ func (cs *ControllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 		return nil, status.Error(codes.InvalidArgument, "Volume capabilities missing in request")
 	}
 
-	for _, cap := range req.GetVolumeCapabilities() {
-		if cap.GetAccessMode() != nil {
-			mode := cap.GetAccessMode().GetMode()
-			if mode != csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER &&
-				mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER &&
-				mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY &&
-				mode != csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
-				return &csi.ValidateVolumeCapabilitiesResponse{
-					Message: "Only RWX, RWO, ROX access modes are supported",
-				}, nil
-			}
-		}
+	metadata, err := cs.manager.GetVolumeMetadata(ctx, req.GetVolumeId())
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "volume %s not found", req.GetVolumeId())
+	}
+
+	protocol := metadata.Protocol
+	if protocol == "" {
+		protocol = zerofs.ProtocolNFS
+	}
+	if err := validateVolumeCapabilities(req.GetVolumeCapabilities(), protocol); err != nil {
+		return &csi.ValidateVolumeCapabilitiesResponse{Message: err.Error()}, nil
 	}
 
 	return &csi.ValidateVolumeCapabilitiesResponse{
@@ -200,12 +224,70 @@ func (cs *ControllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 
 func (cs *ControllerServer) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	klog.V(4).Infof("ListVolumes called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ListVolumes is not implemented")
+
+	volumes, err := cs.manager.ListVolumeMetadata(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list volumes: %v", err)
+	}
+
+	startingIndex := 0
+	if req.GetStartingToken() != "" {
+		parsed, err := strconv.Atoi(req.GetStartingToken())
+		if err != nil || parsed < 0 {
+			return nil, status.Error(codes.InvalidArgument, "invalid starting token")
+		}
+		startingIndex = parsed
+	}
+
+	if startingIndex > len(volumes) {
+		return nil, status.Error(codes.InvalidArgument, "starting token beyond volume list")
+	}
+
+	maxEntries := len(volumes) - startingIndex
+	if req.GetMaxEntries() > 0 && int(req.GetMaxEntries()) < maxEntries {
+		maxEntries = int(req.GetMaxEntries())
+	}
+
+	entries := make([]*csi.ListVolumesResponse_Entry, 0, maxEntries)
+	for _, record := range volumes[startingIndex : startingIndex+maxEntries] {
+		port := zerofs.NFSPort
+		if record.Protocol == zerofs.ProtocolNinep {
+			port = zerofs.NinepPort
+		}
+		volumeContext := map[string]string{
+			"server":   record.ServerName,
+			"serverIP": record.ServiceIP,
+			"port":     fmt.Sprintf("%d", port),
+			"share":    "/",
+			"protocol": string(record.Protocol),
+		}
+		if record.ServiceIP == "" {
+			delete(volumeContext, "serverIP")
+		}
+
+		entries = append(entries, &csi.ListVolumesResponse_Entry{
+			Volume: &csi.Volume{
+				VolumeId:      record.VolumeID,
+				CapacityBytes: record.CapacityBytes,
+				VolumeContext: volumeContext,
+			},
+		})
+	}
+
+	nextToken := ""
+	if startingIndex+maxEntries < len(volumes) {
+		nextToken = strconv.Itoa(startingIndex + maxEntries)
+	}
+
+	return &csi.ListVolumesResponse{
+		Entries:   entries,
+		NextToken: nextToken,
+	}, nil
 }
 
 func (cs *ControllerServer) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	klog.V(4).Infof("GetCapacity called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "GetCapacity is not implemented")
+	return &csi.GetCapacityResponse{AvailableCapacity: 0}, nil
 }
 
 func (cs *ControllerServer) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
@@ -234,17 +316,17 @@ func (cs *ControllerServer) ControllerGetCapabilities(ctx context.Context, req *
 
 func (cs *ControllerServer) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
 	klog.V(4).Infof("CreateSnapshot called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "CreateSnapshot is not implemented")
+	return nil, status.Error(codes.Unimplemented, "snapshots are not supported")
 }
 
 func (cs *ControllerServer) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
 	klog.V(4).Infof("DeleteSnapshot called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "DeleteSnapshot is not implemented")
+	return nil, status.Error(codes.Unimplemented, "snapshots are not supported")
 }
 
 func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	klog.V(4).Infof("ListSnapshots called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ListSnapshots is not implemented")
+	return nil, status.Error(codes.Unimplemented, "snapshots are not supported")
 }
 
 func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
@@ -255,6 +337,14 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
 	}
 
+	if req.GetCapacityRange() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Capacity range missing in request")
+	}
+
+	if err := cs.manager.UpdateVolumeCapacity(ctx, volumeID, req.GetCapacityRange().GetRequiredBytes()); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update volume metadata: %v", err)
+	}
+
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         req.GetCapacityRange().GetRequiredBytes(),
 		NodeExpansionRequired: false,
@@ -263,5 +353,40 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 
 func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	klog.V(4).Infof("ControllerGetVolume called with req: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ControllerGetVolume is not implemented")
+	volumeID := req.GetVolumeId()
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
+	}
+
+	metadata, err := cs.manager.GetVolumeMetadata(ctx, volumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "volume %s not found", volumeID)
+	}
+
+	protocol := metadata.Protocol
+	if protocol == "" {
+		protocol = zerofs.ProtocolNFS
+	}
+	port := zerofs.NFSPort
+	if protocol == zerofs.ProtocolNinep {
+		port = zerofs.NinepPort
+	}
+	volumeContext := map[string]string{
+		"server":   metadata.ServerName,
+		"serverIP": metadata.ServiceIP,
+		"port":     fmt.Sprintf("%d", port),
+		"share":    "/",
+		"protocol": string(protocol),
+	}
+	if metadata.ServiceIP == "" {
+		delete(volumeContext, "serverIP")
+	}
+
+	return &csi.ControllerGetVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeID,
+			CapacityBytes: metadata.CapacityBytes,
+			VolumeContext: volumeContext,
+		},
+	}, nil
 }

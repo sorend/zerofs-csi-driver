@@ -29,15 +29,15 @@ A Container Storage Interface (CSI) driver for Kubernetes that provides persiste
 ### Quick Install
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/zerofs/zerofs-csi-driver/main/deploy/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/zerofs/csi-driver-zerofs/main/deploy/install.yaml
 ```
 
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/zerofs/zerofs-csi-driver.git
-cd zerofs-csi-driver
+git clone https://github.com/zerofs/csi-driver-zerofs.git
+cd csi-driver-zerofs
 
 # Build and install
 make build
@@ -221,7 +221,7 @@ spec:
 #### Controller Service
 
 ```bash
-zerofs-csi-driver controller [flags]
+csi-driver-zerofs controller [flags]
 ```
 
 | Flag | Description | Default |
@@ -231,12 +231,12 @@ zerofs-csi-driver controller [flags]
 | `--namespace` | Namespace to run in | `default` |
 | `--kubeconfig` | Path to kubeconfig file | (in-cluster) |
 | `--work-dir` | Working directory | `/var/lib/zerofs-csi` |
-| `--zerofs-image` | ZeroFS server container image | `zerofs/zerofs:latest` |
+| `--zerofs-image` | ZeroFS server container image | `ghcr.io/barre/zerofs:1.0.4` |
 
 #### Node Service
 
 ```bash
-zerofs-csi-driver node [flags]
+csi-driver-zerofs node [flags]
 ```
 
 | Flag | Description | Default |
@@ -283,7 +283,7 @@ make docker-build-push REGISTRY=your-registry TAG=v1.0.0
 
 ```
 .
-├── cmd/zerofs-csi-driver/    # Main entrypoint
+├── cmd/csi-driver-zerofs/    # Main entrypoint
 ├── pkg/
 │   ├── driver/               # CSI driver implementation
 │   │   ├── controller.go     # Controller server

@@ -7,8 +7,10 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestDriver(t *testing.T) {
@@ -211,8 +213,8 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
 
-		ginkgo.It("should accept RWX access mode", func() {
-			resp, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+		ginkgo.It("should return not found when volume metadata is missing", func() {
+			_, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 				VolumeId: "test-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
 					{
@@ -222,11 +224,18 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 					},
 				},
 			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(resp.Confirmed).NotTo(gomega.BeNil())
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			st, ok := status.FromError(err)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.NotFound))
 		})
 
-		ginkgo.It("should accept RWO access mode", func() {
+		ginkgo.It("should accept RWO access mode when metadata exists", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			_, _, err := cs.manager.CreateZerofsDeployment(context.Background(), "test-volume", "s3://bucket/volumes/test-volume", zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			resp, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 				VolumeId: "test-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -252,6 +261,11 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 		})
 
 		ginkgo.It("should return success with valid request", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			_, _, err := cs.manager.CreateZerofsDeployment(context.Background(), "test-volume", "s3://bucket/volumes/test-volume", zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			resp, err := cs.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{
 				VolumeId: "test-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -281,20 +295,18 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
 		})
 
-		ginkgo.It("ListVolumes should return unimplemented", func() {
+		ginkgo.It("ListVolumes should not return unimplemented", func() {
 			_, err := cs.ListVolumes(context.Background(), &csi.ListVolumesRequest{})
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			st, ok := status.FromError(err)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			if err != nil {
+				st, ok := status.FromError(err)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(st.Code()).NotTo(gomega.Equal(codes.Unimplemented))
+			}
 		})
 
-		ginkgo.It("GetCapacity should return unimplemented", func() {
+		ginkgo.It("GetCapacity should not return unimplemented", func() {
 			_, err := cs.GetCapacity(context.Background(), &csi.GetCapacityRequest{})
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			st, ok := status.FromError(err)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("CreateSnapshot should return unimplemented", func() {
@@ -321,12 +333,12 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
 		})
 
-		ginkgo.It("ControllerGetVolume should return unimplemented", func() {
+		ginkgo.It("ControllerGetVolume should return invalid argument when volume ID missing", func() {
 			_, err := cs.ControllerGetVolume(context.Background(), &csi.ControllerGetVolumeRequest{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			st, ok := status.FromError(err)
 			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
 	})
 })

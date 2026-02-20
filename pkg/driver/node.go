@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/zerofs-csi-driver/pkg/zerofs"
+	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -42,6 +43,9 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	if stagingTargetPath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing in request")
 	}
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
+	}
 
 	server := volumeContext["server"]
 	port := volumeContext["port"]
@@ -56,6 +60,10 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	protocol := zerofs.ProtocolNFS
 	if p, ok := volumeContext["protocol"]; ok {
 		protocol = zerofs.Protocol(p)
+	}
+
+	if err := validateVolumeCapabilities([]*csi.VolumeCapability{req.GetVolumeCapability()}, protocol); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	if err := os.MkdirAll(stagingTargetPath, 0750); err != nil {
@@ -177,6 +185,9 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	if targetPath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
+	}
 
 	if err := os.MkdirAll(targetPath, 0750); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create target directory: %v", err)
@@ -246,6 +257,9 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	if volumePath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume path missing in request")
 	}
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
+	}
 
 	var stat os.FileInfo
 	stat, err := os.Stat(volumePath)
@@ -267,10 +281,33 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 		}, nil
 	}
 
+	var fsStats syscall.Statfs_t
+	if err := syscall.Statfs(volumePath, &fsStats); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to statfs volume path %s: %v", volumePath, err)
+	}
+
+	blockSize := int64(fsStats.Bsize)
+	available := int64(fsStats.Bavail) * blockSize
+	total := int64(fsStats.Blocks) * blockSize
+	used := total - available
+
+	inodeAvailable := int64(fsStats.Ffree)
+	inodeTotal := int64(fsStats.Files)
+	inodeUsed := inodeTotal - inodeAvailable
+
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{
 			{
-				Unit: csi.VolumeUsage_BYTES,
+				Available: available,
+				Total:     total,
+				Used:      used,
+				Unit:      csi.VolumeUsage_BYTES,
+			},
+			{
+				Available: inodeAvailable,
+				Total:     inodeTotal,
+				Used:      inodeUsed,
+				Unit:      csi.VolumeUsage_INODES,
 			},
 		},
 	}, nil
@@ -287,6 +324,9 @@ func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	}
 	if volumePath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume path missing in request")
+	}
+	if req.GetCapacityRange() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Capacity range missing in request")
 	}
 
 	return &csi.NodeExpandVolumeResponse{

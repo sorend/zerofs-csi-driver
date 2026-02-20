@@ -93,15 +93,16 @@ func (m *Manager) CreateZerofsDeployment(ctx context.Context, volumeID, storageU
 			"zerofs.toml": []byte(configData),
 		},
 	}
+	metadataAnnotations := m.buildVolumeAnnotations(storageURL, protocol, nodeName, size)
+	m.mergeMetadata(&secret.ObjectMeta, secret.Labels, metadataAnnotations)
 
-	_, err := m.k8sClient.CoreV1().Secrets(m.namespace).Create(ctx, secret, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
+	if err := m.upsertSecret(ctx, secret); err != nil {
 		return "", "", fmt.Errorf("failed to create secret: %w", err)
 	}
 
 	deployment := m.buildDeployment(deploymentName, volumeID, secretName, protocol, nodeName, size)
-	_, err = m.k8sClient.AppsV1().Deployments(m.namespace).Create(ctx, deployment, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
+	m.mergeMetadata(&deployment.ObjectMeta, deployment.Labels, metadataAnnotations)
+	if err := m.upsertDeployment(ctx, deployment); err != nil {
 		return "", "", fmt.Errorf("failed to create deployment: %w", err)
 	}
 

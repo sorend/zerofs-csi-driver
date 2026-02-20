@@ -1,7 +1,7 @@
 .PHONY: all build test clean docker-build docker-push install lint fmt vet
 
 REGISTRY ?= ghcr.io/sorend
-IMAGE_NAME ?= zerofs-csi-driver
+IMAGE_NAME ?= csi-driver-zerofs
 TAG ?= latest
 LDFLAGS ?= -s -w -extldflags "-static"
 GOOS ?= linux
@@ -10,13 +10,13 @@ GOARCH ?= $(shell go env GOARCH)
 all: build
 
 build:
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "$(LDFLAGS)" -o bin/zerofs-csi-driver ./cmd/zerofs-csi-driver
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "$(LDFLAGS)" -o bin/csi-driver-zerofs ./cmd/csi-driver-zerofs
 
 build-linux-amd64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/zerofs-csi-driver-linux-amd64 ./cmd/zerofs-csi-driver
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/csi-driver-zerofs-linux-amd64 ./cmd/csi-driver-zerofs
 
 build-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/zerofs-csi-driver-linux-arm64 ./cmd/zerofs-csi-driver
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/csi-driver-zerofs-linux-arm64 ./cmd/csi-driver-zerofs
 
 build-all: build-linux-amd64 build-linux-arm64
 
