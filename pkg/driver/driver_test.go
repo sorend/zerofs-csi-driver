@@ -296,6 +296,40 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
+
+		ginkgo.It("should succeed when volume exists", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			// Create the volume first.
+			_, _, err := cs.manager.CreateZerofsDeployment(
+				context.Background(), "pvc-delete-me",
+				"s3://bucket/volumes/pvc-delete-me",
+				zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Now delete it via the CSI interface.
+			resp, err := cs.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+				VolumeId: "pvc-delete-me",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			// Verify the K8s Deployment was removed.
+			_, err = fakeClient.AppsV1().Deployments("default").Get(
+				context.Background(), cs.manager.GetDeploymentName("pvc-delete-me"), metav1.GetOptions{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should succeed (idempotent) when volume does not exist", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+
+			resp, err := cs.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+				VolumeId: "pvc-already-gone",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+		})
 	})
 
 	ginkgo.Context("ValidateVolumeCapabilities", func() {

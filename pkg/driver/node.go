@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
@@ -14,6 +16,8 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
+
+const unmountTimeout = 30 * time.Second
 
 type NodeServer struct {
 	driver  *Driver
@@ -28,6 +32,25 @@ func NewNodeServer(d *Driver) *NodeServer {
 			Interface: mount.New(""),
 		},
 	}
+}
+
+// unmountWithTimeout runs umount(8) with a hard deadline.  If the unmount
+// subprocess does not complete within the timeout the process is killed and an
+// error is returned.  This prevents NodeUnstageVolume / NodeUnpublishVolume
+// from hanging indefinitely when the remote NFS/9P server is unreachable.
+func unmountWithTimeout(path string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "umount", path)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("umount timed out after %s for path %s (output: %s)", timeout, path, strings.TrimSpace(string(out)))
+	}
+	if err != nil {
+		return fmt.Errorf("umount failed for path %s: %v (output: %s)", path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -70,11 +93,11 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Errorf(codes.Internal, "failed to create staging directory: %v", err)
 	}
 
-	isMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
+	notMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to check mount point: %v", err)
 	}
-	if !isMnt {
+	if !notMnt {
 		klog.V(4).Infof("Volume %s already staged at %s", volumeID, stagingTargetPath)
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
@@ -94,7 +117,7 @@ func (ns *NodeServer) stageNFSVolume(volumeID, server, port, share, stagingTarge
 	}
 	source = fmt.Sprintf("%s:%s", source, share)
 
-	mountOptions := []string{"nolock", "vers=3", "tcp", "port=2049", "mountport=2049"}
+	mountOptions := []string{"nolock", "vers=3", "tcp", "port=2049", "mountport=2049", "soft", "timeo=30", "retrans=2"}
 	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
 		mountOptions = strings.Split(mo, ",")
 	}
@@ -148,16 +171,16 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing in request")
 	}
 
-	isMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
+	notMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to check mount point: %v", err)
 	}
-	if isMnt {
+	if notMnt {
 		klog.V(4).Infof("Volume %s already unstaged from %s", volumeID, stagingTargetPath)
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
-	if err := ns.mounter.Unmount(stagingTargetPath); err != nil {
+	if err := unmountWithTimeout(stagingTargetPath, unmountTimeout); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount staging target path %s: %v", stagingTargetPath, err)
 	}
 
@@ -238,7 +261,7 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
-	if err := ns.mounter.Unmount(targetPath); err != nil {
+	if err := unmountWithTimeout(targetPath, unmountTimeout); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount target path %s: %v", targetPath, err)
 	}
 

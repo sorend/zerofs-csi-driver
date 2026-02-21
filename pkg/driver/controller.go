@@ -249,9 +249,6 @@ func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	}
 
 	if err := cs.manager.DeleteZerofsDeployment(ctx, volumeID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return &csi.DeleteVolumeResponse{}, nil
-		}
 		return nil, status.Errorf(codes.Internal, "failed to delete zerofs deployment: %v", err)
 	}
 
