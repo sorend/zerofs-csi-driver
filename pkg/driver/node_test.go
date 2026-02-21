@@ -161,8 +161,19 @@ var _ = ginkgo.Describe("NodeServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
 
+		ginkgo.It("should return error when volume ID is empty", func() {
+			_, err := ns.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+				VolumePath: "/tmp",
+			})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			st, ok := status.FromError(err)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
+		})
+
 		ginkgo.It("should return error when volume path does not exist", func() {
 			_, err := ns.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+				VolumeId:   "test-volume",
 				VolumePath: "/nonexistent/path",
 			})
 			gomega.Expect(err).To(gomega.HaveOccurred())
@@ -177,6 +188,7 @@ var _ = ginkgo.Describe("NodeServer", func() {
 			defer os.RemoveAll(tmpDir)
 
 			resp, err := ns.NodeGetVolumeStats(context.Background(), &csi.NodeGetVolumeStatsRequest{
+				VolumeId:   "test-volume",
 				VolumePath: tmpDir,
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -196,6 +208,17 @@ var _ = ginkgo.Describe("NodeServer", func() {
 		ginkgo.It("should return error when volume path is empty", func() {
 			_, err := ns.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{
 				VolumeId: "test-volume",
+			})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			st, ok := status.FromError(err)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
+		})
+
+		ginkgo.It("should return error when capacity range is empty", func() {
+			_, err := ns.NodeExpandVolume(context.Background(), &csi.NodeExpandVolumeRequest{
+				VolumeId:   "test-volume",
+				VolumePath: "/tmp",
 			})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			st, ok := status.FromError(err)

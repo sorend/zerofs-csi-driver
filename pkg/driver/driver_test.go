@@ -7,8 +7,12 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestDriver(t *testing.T) {
@@ -180,6 +184,108 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
+
+		ginkgo.It("should allow pvc annotations to override storageUrl", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			cs.driver.options.Namespace = "default"
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+					Annotations: map[string]string{
+						zerofs.AnnotationStorageURL: "s3://override-bucket/data",
+					},
+				},
+			}
+			_, err := fakeClient.CoreV1().PersistentVolumeClaims("default").Create(context.Background(), pvc, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			_, err = cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+				Name: "test-volume",
+				Parameters: map[string]string{
+					"storageUrl":                       "s3://base-bucket/data",
+					"csi.storage.k8s.io/pvc/name":      "test-pvc",
+					"csi.storage.k8s.io/pvc/namespace": "default",
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			metadata, err := cs.manager.GetVolumeMetadata(context.Background(), "test-volume")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(metadata.StorageURL).To(gomega.Equal("s3://override-bucket/data/volumes/test-volume"))
+		})
+
+		ginkgo.It("should ignore inline access key parameters", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			cs.driver.options.Namespace = "default"
+			pvc := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pvc",
+					Namespace: "default",
+					Annotations: map[string]string{
+						zerofs.AnnotationStorageURL: "s3://base-bucket/data",
+					},
+				},
+			}
+			_, err := fakeClient.CoreV1().PersistentVolumeClaims("default").Create(context.Background(), pvc, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "zerofs-aws-credentials",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"awsAccessKeyID":     []byte("secret-access-key"),
+					"awsSecretAccessKey": []byte("secret-secret-key"),
+				},
+			}
+			_, err = fakeClient.CoreV1().Secrets("default").Create(context.Background(), secret, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			_, err = cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+				Name: "test-volume-keys",
+				Parameters: map[string]string{
+					"storageUrl":                       "s3://base-bucket/data",
+					"csi.storage.k8s.io/pvc/name":      "test-pvc",
+					"csi.storage.k8s.io/pvc/namespace": "default",
+					"awsSecretName":                    "zerofs-aws-credentials",
+					"awsAccessKeyID":                   "param-access-key",
+					"awsSecretAccessKey":               "param-secret-key",
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+						},
+					},
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			secretName := cs.manager.GetSecretName("test-volume-keys")
+			createdSecret, err := fakeClient.CoreV1().Secrets("default").Get(context.Background(), secretName, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			configData := string(createdSecret.Data["zerofs.toml"])
+			gomega.Expect(configData).To(gomega.ContainSubstring("secret-access-key"))
+			gomega.Expect(configData).To(gomega.ContainSubstring("secret-secret-key"))
+			gomega.Expect(configData).NotTo(gomega.ContainSubstring("param-access-key"))
+			gomega.Expect(configData).NotTo(gomega.ContainSubstring("param-secret-key"))
+		})
 	})
 
 	ginkgo.Context("DeleteVolume", func() {
@@ -189,6 +295,40 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			st, ok := status.FromError(err)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
+		})
+
+		ginkgo.It("should succeed when volume exists", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			// Create the volume first.
+			_, _, err := cs.manager.CreateZerofsDeployment(
+				context.Background(), "pvc-delete-me",
+				"s3://bucket/volumes/pvc-delete-me",
+				zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Now delete it via the CSI interface.
+			resp, err := cs.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+				VolumeId: "pvc-delete-me",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			// Verify the K8s Deployment was removed.
+			_, err = fakeClient.AppsV1().Deployments("default").Get(
+				context.Background(), cs.manager.GetDeploymentName("pvc-delete-me"), metav1.GetOptions{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should succeed (idempotent) when volume does not exist", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+
+			resp, err := cs.DeleteVolume(context.Background(), &csi.DeleteVolumeRequest{
+				VolumeId: "pvc-already-gone",
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
 		})
 	})
 
@@ -211,8 +351,8 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
 
-		ginkgo.It("should accept RWX access mode", func() {
-			resp, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
+		ginkgo.It("should return not found when volume metadata is missing", func() {
+			_, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 				VolumeId: "test-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
 					{
@@ -222,11 +362,18 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 					},
 				},
 			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(resp.Confirmed).NotTo(gomega.BeNil())
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			st, ok := status.FromError(err)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.NotFound))
 		})
 
-		ginkgo.It("should accept RWO access mode", func() {
+		ginkgo.It("should accept RWO access mode when metadata exists", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			_, _, err := cs.manager.CreateZerofsDeployment(context.Background(), "test-volume", "s3://bucket/volumes/test-volume", zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			resp, err := cs.ValidateVolumeCapabilities(context.Background(), &csi.ValidateVolumeCapabilitiesRequest{
 				VolumeId: "test-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -252,6 +399,11 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 		})
 
 		ginkgo.It("should return success with valid request", func() {
+			fakeClient := fake.NewSimpleClientset()
+			cs.manager.SetClient(fakeClient)
+			_, _, err := cs.manager.CreateZerofsDeployment(context.Background(), "test-volume", "s3://bucket/volumes/test-volume", zerofs.ProtocolNFS, "", map[string]string{}, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			resp, err := cs.ControllerExpandVolume(context.Background(), &csi.ControllerExpandVolumeRequest{
 				VolumeId: "test-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -281,20 +433,18 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
 		})
 
-		ginkgo.It("ListVolumes should return unimplemented", func() {
+		ginkgo.It("ListVolumes should not return unimplemented", func() {
 			_, err := cs.ListVolumes(context.Background(), &csi.ListVolumesRequest{})
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			st, ok := status.FromError(err)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			if err != nil {
+				st, ok := status.FromError(err)
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(st.Code()).NotTo(gomega.Equal(codes.Unimplemented))
+			}
 		})
 
-		ginkgo.It("GetCapacity should return unimplemented", func() {
+		ginkgo.It("GetCapacity should not return unimplemented", func() {
 			_, err := cs.GetCapacity(context.Background(), &csi.GetCapacityRequest{})
-			gomega.Expect(err).To(gomega.HaveOccurred())
-			st, ok := status.FromError(err)
-			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
 		ginkgo.It("CreateSnapshot should return unimplemented", func() {
@@ -321,12 +471,12 @@ var _ = ginkgo.Describe("ControllerServer", func() {
 			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
 		})
 
-		ginkgo.It("ControllerGetVolume should return unimplemented", func() {
+		ginkgo.It("ControllerGetVolume should return invalid argument when volume ID missing", func() {
 			_, err := cs.ControllerGetVolume(context.Background(), &csi.ControllerGetVolumeRequest{})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			st, ok := status.FromError(err)
 			gomega.Expect(ok).To(gomega.BeTrue())
-			gomega.Expect(st.Code()).To(gomega.Equal(codes.Unimplemented))
+			gomega.Expect(st.Code()).To(gomega.Equal(codes.InvalidArgument))
 		})
 	})
 })

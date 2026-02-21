@@ -4,15 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/zerofs-csi-driver/pkg/zerofs"
+	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
 	"k8s.io/mount-utils"
 )
+
+const unmountTimeout = 30 * time.Second
 
 type NodeServer struct {
 	driver  *Driver
@@ -29,6 +34,25 @@ func NewNodeServer(d *Driver) *NodeServer {
 	}
 }
 
+// unmountWithTimeout runs umount(8) with a hard deadline.  If the unmount
+// subprocess does not complete within the timeout the process is killed and an
+// error is returned.  This prevents NodeUnstageVolume / NodeUnpublishVolume
+// from hanging indefinitely when the remote NFS/9P server is unreachable.
+func unmountWithTimeout(path string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "umount", path)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("umount timed out after %s for path %s (output: %s)", timeout, path, strings.TrimSpace(string(out)))
+	}
+	if err != nil {
+		return fmt.Errorf("umount failed for path %s: %v (output: %s)", path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	klog.V(4).Infof("NodeStageVolume called with req: %+v", req)
 
@@ -41,6 +65,9 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 	if stagingTargetPath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing in request")
+	}
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
 	}
 
 	server := volumeContext["server"]
@@ -58,15 +85,19 @@ func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		protocol = zerofs.Protocol(p)
 	}
 
+	if err := validateVolumeCapabilities([]*csi.VolumeCapability{req.GetVolumeCapability()}, protocol); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	if err := os.MkdirAll(stagingTargetPath, 0750); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create staging directory: %v", err)
 	}
 
-	isMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
+	notMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to check mount point: %v", err)
 	}
-	if !isMnt {
+	if !notMnt {
 		klog.V(4).Infof("Volume %s already staged at %s", volumeID, stagingTargetPath)
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
@@ -86,7 +117,7 @@ func (ns *NodeServer) stageNFSVolume(volumeID, server, port, share, stagingTarge
 	}
 	source = fmt.Sprintf("%s:%s", source, share)
 
-	mountOptions := []string{"nolock", "vers=3", "tcp", "port=2049", "mountport=2049"}
+	mountOptions := []string{"nolock", "vers=3", "tcp", "port=2049", "mountport=2049", "soft", "timeo=30", "retrans=2"}
 	if mo, ok := volumeContext["mountOptions"]; ok && mo != "" {
 		mountOptions = strings.Split(mo, ",")
 	}
@@ -140,16 +171,16 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing in request")
 	}
 
-	isMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
+	notMnt, err := ns.mounter.IsLikelyNotMountPoint(stagingTargetPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, status.Errorf(codes.Internal, "failed to check mount point: %v", err)
 	}
-	if isMnt {
+	if notMnt {
 		klog.V(4).Infof("Volume %s already unstaged from %s", volumeID, stagingTargetPath)
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
-	if err := ns.mounter.Unmount(stagingTargetPath); err != nil {
+	if err := unmountWithTimeout(stagingTargetPath, unmountTimeout); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount staging target path %s: %v", stagingTargetPath, err)
 	}
 
@@ -176,6 +207,9 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 	if targetPath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
+	}
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
 	}
 
 	if err := os.MkdirAll(targetPath, 0750); err != nil {
@@ -227,7 +261,7 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
-	if err := ns.mounter.Unmount(targetPath); err != nil {
+	if err := unmountWithTimeout(targetPath, unmountTimeout); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to unmount target path %s: %v", targetPath, err)
 	}
 
@@ -245,6 +279,9 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	volumePath := req.GetVolumePath()
 	if volumePath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume path missing in request")
+	}
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
 	}
 
 	var stat os.FileInfo
@@ -267,10 +304,33 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 		}, nil
 	}
 
+	var fsStats syscall.Statfs_t
+	if err := syscall.Statfs(volumePath, &fsStats); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to statfs volume path %s: %v", volumePath, err)
+	}
+
+	blockSize := int64(fsStats.Bsize)
+	available := int64(fsStats.Bavail) * blockSize
+	total := int64(fsStats.Blocks) * blockSize
+	used := total - available
+
+	inodeAvailable := int64(fsStats.Ffree)
+	inodeTotal := int64(fsStats.Files)
+	inodeUsed := inodeTotal - inodeAvailable
+
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{
 			{
-				Unit: csi.VolumeUsage_BYTES,
+				Available: available,
+				Total:     total,
+				Used:      used,
+				Unit:      csi.VolumeUsage_BYTES,
+			},
+			{
+				Available: inodeAvailable,
+				Total:     inodeTotal,
+				Used:      inodeUsed,
+				Unit:      csi.VolumeUsage_INODES,
 			},
 		},
 	}, nil
@@ -287,6 +347,9 @@ func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	}
 	if volumePath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume path missing in request")
+	}
+	if req.GetCapacityRange() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Capacity range missing in request")
 	}
 
 	return &csi.NodeExpandVolumeResponse{
