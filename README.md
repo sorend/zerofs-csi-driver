@@ -1,5 +1,9 @@
 # ZeroFS CSI Driver
 
+<p align="center">
+  <img src="docs/logo.svg" alt="ZeroFS Logo" width="180"/>
+</p>
+
 > **Work in progress.** Vibe coded, not for production use.
 
 A Kubernetes CSI driver that provides persistent storage backed by S3-compatible object storage via [ZeroFS](https://github.com/barre/zerofs). Volumes are served over NFS (ReadWriteMany) or 9P (ReadWriteOnce).
