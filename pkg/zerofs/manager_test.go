@@ -89,15 +89,13 @@ var _ = ginkgo.Describe("Manager", func() {
 			gomega.Expect(config).To(gomega.ContainSubstring("disk_size_gb = 20"))
 		})
 
-		ginkgo.It("should not include AWS credentials from params", func() {
+		ginkgo.It("should not include credentials when awsSecretName is not provided", func() {
 			params := map[string]string{
-				"awsAccessKeyID":     "test-access-key",
-				"awsSecretAccessKey": "test-secret-key",
-				"awsEndpoint":        "http://minio:9000",
+				"awsEndpoint": "http://minio:9000",
 			}
 			config := manager.generateConfig("s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("test-access-key"))
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("test-secret-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("access_key_id"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("secret_access_key"))
 			gomega.Expect(config).NotTo(gomega.ContainSubstring("http://minio:9000"))
 		})
 
@@ -130,33 +128,37 @@ var _ = ginkgo.Describe("Manager", func() {
 			manager.SetClient(fakeClient)
 
 			params := map[string]string{
-				"awsSecretName":      "non-existent-secret",
-				"awsAccessKeyID":     "fallback-access-key",
-				"awsSecretAccessKey": "fallback-secret-key",
+				"awsSecretName": "non-existent-secret",
 			}
 			config := manager.generateConfigWithContext(context.Background(), "s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("fallback-access-key"))
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("fallback-secret-key"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("access_key_id"))
+			gomega.Expect(config).NotTo(gomega.ContainSubstring("secret_access_key"))
 		})
 
 		ginkgo.It("should include effective AWS annotations", func() {
 			params := map[string]string{
-				"awsEndpoint":   "http://minio:9000",
-				"awsAllowHTTP":  "false",
-				"awsSecretName": "aws-credentials",
+				"awsEndpoint":           "http://minio:9000",
+				"awsAllowHTTP":          "false",
+				"awsSecretName":         "aws-credentials",
+				"awsAccessKeyIDKey":     "my_key",
+				"awsSecretAccessKeyKey": "my_secret",
 			}
 			annotations := manager.buildVolumeAnnotations("s3://my-bucket/data", ProtocolNFS, "", 1024, params)
 			gomega.Expect(annotations[AnnotationAWSEndpoint]).To(gomega.Equal("http://minio:9000"))
 			gomega.Expect(annotations[AnnotationAWSAllowHTTP]).To(gomega.Equal("false"))
 			gomega.Expect(annotations[AnnotationAWSSecretName]).To(gomega.Equal("aws-credentials"))
+			gomega.Expect(annotations[AnnotationAWSAccessKeyIDKey]).To(gomega.Equal("my_key"))
+			gomega.Expect(annotations[AnnotationAWSSecretAccessKeyKey]).To(gomega.Equal("my_secret"))
 		})
 
 		ginkgo.It("should default awsAllowHTTP annotation when missing", func() {
 			annotations := manager.buildVolumeAnnotations("s3://my-bucket/data", ProtocolNFS, "", 1024, map[string]string{})
 			gomega.Expect(annotations[AnnotationAWSAllowHTTP]).To(gomega.Equal("true"))
+			gomega.Expect(annotations[AnnotationAWSAccessKeyIDKey]).To(gomega.Equal(DefaultAWSAccessKeyIDKey))
+			gomega.Expect(annotations[AnnotationAWSSecretAccessKeyKey]).To(gomega.Equal(DefaultAWSSecretAccessKeyKey))
 		})
 
-		ginkgo.It("should prefer secret over params for AWS credentials", func() {
+		ginkgo.It("should use custom key names from params to look up credentials in the secret", func() {
 			fakeClient := fake.NewSimpleClientset()
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
@@ -164,8 +166,8 @@ var _ = ginkgo.Describe("Manager", func() {
 					Namespace: "default",
 				},
 				Data: map[string][]byte{
-					"awsAccessKeyID":     []byte("from-secret-key"),
-					"awsSecretAccessKey": []byte("from-secret-value"),
+					"my_access_key": []byte("custom-access-key"),
+					"my_secret_key": []byte("custom-secret-key"),
 				},
 			}
 			_, err := fakeClient.CoreV1().Secrets("default").Create(context.Background(), secret, metav1.CreateOptions{})
@@ -173,24 +175,37 @@ var _ = ginkgo.Describe("Manager", func() {
 
 			manager.SetClient(fakeClient)
 			params := map[string]string{
-				"awsSecretName":      "aws-credentials",
-				"awsAccessKeyID":     "from-param-key",
-				"awsSecretAccessKey": "from-param-value",
+				"awsSecretName":         "aws-credentials",
+				"awsAccessKeyIDKey":     "my_access_key",
+				"awsSecretAccessKeyKey": "my_secret_key",
 			}
 			config := manager.generateConfigWithContext(context.Background(), "s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).To(gomega.ContainSubstring("from-secret-key"))
-			gomega.Expect(config).To(gomega.ContainSubstring("from-secret-value"))
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("from-param-key"))
+			gomega.Expect(config).To(gomega.ContainSubstring("custom-access-key"))
+			gomega.Expect(config).To(gomega.ContainSubstring("custom-secret-key"))
 		})
 
-		ginkgo.It("should not use param credentials without secret", func() {
+		ginkgo.It("should use default key names when awsAccessKeyIDKey and awsSecretAccessKeyKey are not specified", func() {
+			fakeClient := fake.NewSimpleClientset()
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "aws-credentials",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"awsAccessKeyID":     []byte("default-access-key"),
+					"awsSecretAccessKey": []byte("default-secret-key"),
+				},
+			}
+			_, err := fakeClient.CoreV1().Secrets("default").Create(context.Background(), secret, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			manager.SetClient(fakeClient)
 			params := map[string]string{
-				"awsAccessKeyID":     "param-access-key",
-				"awsSecretAccessKey": "param-secret-key",
+				"awsSecretName": "aws-credentials",
 			}
 			config := manager.generateConfigWithContext(context.Background(), "s3://my-bucket/data", ProtocolNFS, params, nil)
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("param-access-key"))
-			gomega.Expect(config).NotTo(gomega.ContainSubstring("param-secret-key"))
+			gomega.Expect(config).To(gomega.ContainSubstring("default-access-key"))
+			gomega.Expect(config).To(gomega.ContainSubstring("default-secret-key"))
 		})
 	})
 
@@ -401,6 +416,42 @@ var _ = ginkgo.Describe("Manager", func() {
 
 			gomega.Expect(capturedCfg.AccessKeyID).To(gomega.Equal("del-access-key"))
 			gomega.Expect(capturedCfg.SecretAccessKey).To(gomega.Equal("del-secret-key"))
+		})
+
+		ginkgo.It("should use custom key names during S3 data deletion", func() {
+			awsSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "aws-creds-custom", Namespace: "default"},
+				Data: map[string][]byte{
+					"my_key":    []byte("custom-del-access-key"),
+					"my_secret": []byte("custom-del-secret-key"),
+				},
+			}
+			_, err := fakeClient.CoreV1().Secrets("default").Create(
+				context.Background(), awsSecret, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			var capturedCfg S3ClientConfig
+			manager.newS3ClientFn = func(cfg S3ClientConfig) s3API {
+				capturedCfg = cfg
+				return s3Mock
+			}
+
+			params := map[string]string{
+				"awsSecretName":         "aws-creds-custom",
+				"awsAccessKeyIDKey":     "my_key",
+				"awsSecretAccessKeyKey": "my_secret",
+			}
+			_, _, err = manager.CreateZerofsDeployment(
+				context.Background(), "pvc-del-5",
+				"s3://creds-bucket/zerofs/volumes/pvc-del-5",
+				ProtocolNFS, "", params, map[string]string{}, 1024)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = manager.DeleteZerofsDeployment(context.Background(), "pvc-del-5")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Expect(capturedCfg.AccessKeyID).To(gomega.Equal("custom-del-access-key"))
+			gomega.Expect(capturedCfg.SecretAccessKey).To(gomega.Equal("custom-del-secret-key"))
 		})
 
 		ginkgo.It("should succeed (idempotent) when the volume does not exist", func() {

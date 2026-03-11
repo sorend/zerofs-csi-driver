@@ -13,13 +13,20 @@ import (
 )
 
 const (
-	AnnotationStorageURL    = "zerofs.csi.sorend.github.com/storage-url"
-	AnnotationCapacity      = "zerofs.csi.sorend.github.com/capacity-bytes"
-	AnnotationNodeName      = "zerofs.csi.sorend.github.com/node-name"
-	AnnotationProtocol      = "zerofs.csi.sorend.github.com/protocol"
-	AnnotationAWSEndpoint   = "zerofs.csi.sorend.github.com/aws-endpoint"
-	AnnotationAWSAllowHTTP  = "zerofs.csi.sorend.github.com/aws-allow-http"
-	AnnotationAWSSecretName = "zerofs.csi.sorend.github.com/aws-secret-name"
+	AnnotationStorageURL            = "zerofs.csi.sorend.github.com/storage-url"
+	AnnotationCapacity              = "zerofs.csi.sorend.github.com/capacity-bytes"
+	AnnotationNodeName              = "zerofs.csi.sorend.github.com/node-name"
+	AnnotationProtocol              = "zerofs.csi.sorend.github.com/protocol"
+	AnnotationAWSEndpoint           = "zerofs.csi.sorend.github.com/aws-endpoint"
+	AnnotationAWSAllowHTTP          = "zerofs.csi.sorend.github.com/aws-allow-http"
+	AnnotationAWSSecretName         = "zerofs.csi.sorend.github.com/aws-secret-name"
+	AnnotationAWSAccessKeyIDKey     = "zerofs.csi.sorend.github.com/aws-access-key-id-key"
+	AnnotationAWSSecretAccessKeyKey = "zerofs.csi.sorend.github.com/aws-secret-access-key-key"
+)
+
+const (
+	DefaultAWSAccessKeyIDKey     = "awsAccessKeyID"
+	DefaultAWSSecretAccessKeyKey = "awsSecretAccessKey"
 )
 
 type VolumeMetadata struct {
@@ -54,6 +61,16 @@ func (m *Manager) buildVolumeAnnotations(storageURL string, protocol Protocol, n
 		if awsSecretName := params["awsSecretName"]; awsSecretName != "" {
 			annotations[AnnotationAWSSecretName] = awsSecretName
 		}
+		accessKeyIDKey := params["awsAccessKeyIDKey"]
+		if accessKeyIDKey == "" {
+			accessKeyIDKey = DefaultAWSAccessKeyIDKey
+		}
+		annotations[AnnotationAWSAccessKeyIDKey] = accessKeyIDKey
+		secretAccessKeyKey := params["awsSecretAccessKeyKey"]
+		if secretAccessKeyKey == "" {
+			secretAccessKeyKey = DefaultAWSSecretAccessKeyKey
+		}
+		annotations[AnnotationAWSSecretAccessKeyKey] = secretAccessKeyKey
 	}
 	return annotations
 }

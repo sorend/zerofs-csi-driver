@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
+	"github.com/sorend/csi-driver-zerofs/pkg/zerofs"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -39,8 +39,6 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	secrets := req.GetSecrets()
 	params = mergeMapCopy(params)
 	cs.applyPVCOverrides(ctx, params)
-	cs.warnIfCredentialsProvided(params)
-	params = filterDisallowedParams(params)
 
 	reqSize := int64(0)
 	if req.GetCapacityRange() != nil {
@@ -50,6 +48,10 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	storageURL := params["storageUrl"]
 	if storageURL == "" {
 		return nil, status.Error(codes.InvalidArgument, "storageUrl parameter is required")
+	}
+
+	if params["awsSecretName"] == "" {
+		return nil, status.Error(codes.InvalidArgument, "awsSecretName parameter is required")
 	}
 
 	if !strings.HasSuffix(storageURL, "/") {
@@ -198,34 +200,6 @@ func pvcOverrideableParams() map[string]string {
 		"awsEndpoint":   zerofs.AnnotationAWSEndpoint,
 		"awsAllowHTTP":  zerofs.AnnotationAWSAllowHTTP,
 		"awsSecretName": zerofs.AnnotationAWSSecretName,
-	}
-}
-
-func filterDisallowedParams(params map[string]string) map[string]string {
-	if params == nil {
-		return map[string]string{}
-	}
-	filtered := make(map[string]string, len(params))
-	for key, value := range params {
-		switch key {
-		case "awsAccessKeyID", "awsSecretAccessKey":
-			continue
-		default:
-			filtered[key] = value
-		}
-	}
-	return filtered
-}
-
-func (cs *ControllerServer) warnIfCredentialsProvided(params map[string]string) {
-	if params == nil {
-		return
-	}
-	if _, ok := params["awsAccessKeyID"]; ok {
-		klog.Warning("awsAccessKeyID parameter is ignored; use awsSecretName instead")
-	}
-	if _, ok := params["awsSecretAccessKey"]; ok {
-		klog.Warning("awsSecretAccessKey parameter is ignored; use awsSecretName instead")
 	}
 }
 

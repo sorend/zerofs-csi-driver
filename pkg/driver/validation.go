@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
+	"github.com/sorend/csi-driver-zerofs/pkg/zerofs"
 )
 
 func validateVolumeCapabilities(volumeCaps []*csi.VolumeCapability, protocol zerofs.Protocol) error {

@@ -18,7 +18,12 @@ metadata:
 provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
+  # awsSecretName is required: name of the Kubernetes Secret holding S3 credentials.
   awsSecretName: "zerofs-aws-credentials"
+  # Optional: names of the keys within the secret that hold the credentials.
+  # Defaults to awsAccessKeyID and awsSecretAccessKey when not specified.
+  # awsAccessKeyIDKey: "awsAccessKeyID"
+  # awsSecretAccessKeyKey: "awsSecretAccessKey"
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -85,6 +90,9 @@ provisioner: zerofs.csi.sorend.github.com
 parameters:
   storageUrl: "s3://your-bucket/zerofs-data"
   awsSecretName: "zerofs-aws-credentials"
+  # Optional: customize secret key names (defaults shown below)
+  # awsAccessKeyIDKey: "awsAccessKeyID"
+  # awsSecretAccessKeyKey: "awsSecretAccessKey"
   protocol: "ninep"
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer

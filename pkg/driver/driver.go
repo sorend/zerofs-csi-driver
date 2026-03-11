@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
+	"github.com/sorend/csi-driver-zerofs/pkg/zerofs"
 )
 
 const (

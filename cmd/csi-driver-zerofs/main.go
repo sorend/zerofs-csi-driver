@@ -7,9 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/sorend/csi-driver-zerofs/pkg/driver"
+	"github.com/sorend/csi-driver-zerofs/pkg/zerofs"
 	"github.com/spf13/cobra"
-	"github.com/zerofs/csi-driver-zerofs/pkg/driver"
-	"github.com/zerofs/csi-driver-zerofs/pkg/zerofs"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"

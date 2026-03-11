@@ -338,7 +338,15 @@ func (m *Manager) deleteS3Data(ctx context.Context, volumeID string) error {
 
 	// Fetch credentials from the referenced K8s Secret if one was recorded.
 	if secretName := annotations[AnnotationAWSSecretName]; secretName != "" {
-		accessKey, secretKey, err := m.getAWSCredentialsFromSecret(ctx, secretName)
+		accessKeyIDKey := annotations[AnnotationAWSAccessKeyIDKey]
+		if accessKeyIDKey == "" {
+			accessKeyIDKey = DefaultAWSAccessKeyIDKey
+		}
+		secretAccessKeyKey := annotations[AnnotationAWSSecretAccessKeyKey]
+		if secretAccessKeyKey == "" {
+			secretAccessKeyKey = DefaultAWSSecretAccessKeyKey
+		}
+		accessKey, secretKey, err := m.getAWSCredentialsFromSecret(ctx, secretName, accessKeyIDKey, secretAccessKeyKey)
 		if err != nil {
 			klog.Warningf("Failed to fetch AWS credentials from secret %s for volume %s deletion: %v", secretName, volumeID, err)
 		} else {
@@ -352,7 +360,7 @@ func (m *Manager) deleteS3Data(ctx context.Context, volumeID string) error {
 	return deleteS3Prefix(ctx, client, loc.Bucket, loc.Prefix)
 }
 
-func (m *Manager) getAWSCredentialsFromSecret(ctx context.Context, secretName string) (string, string, error) {
+func (m *Manager) getAWSCredentialsFromSecret(ctx context.Context, secretName, accessKeyIDKey, secretAccessKeyKey string) (string, string, error) {
 	if m.k8sClient == nil {
 		return "", "", fmt.Errorf("kubernetes client not initialized")
 	}
@@ -360,10 +368,10 @@ func (m *Manager) getAWSCredentialsFromSecret(ctx context.Context, secretName st
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get secret %s: %w", secretName, err)
 	}
-	accessKey := string(secret.Data["awsAccessKeyID"])
-	secretKey := string(secret.Data["awsSecretAccessKey"])
+	accessKey := string(secret.Data[accessKeyIDKey])
+	secretKey := string(secret.Data[secretAccessKeyKey])
 	if accessKey == "" || secretKey == "" {
-		return "", "", fmt.Errorf("secret %s must contain awsAccessKeyID and awsSecretAccessKey keys", secretName)
+		return "", "", fmt.Errorf("secret %s must contain %s and %s keys", secretName, accessKeyIDKey, secretAccessKeyKey)
 	}
 	return accessKey, secretKey, nil
 }
@@ -401,9 +409,18 @@ func (m *Manager) generateConfigWithContext(ctx context.Context, storageURL stri
 		awsAllowHTTP = "true"
 	}
 
+	accessKeyIDKey := params["awsAccessKeyIDKey"]
+	if accessKeyIDKey == "" {
+		accessKeyIDKey = DefaultAWSAccessKeyIDKey
+	}
+	secretAccessKeyKey := params["awsSecretAccessKeyKey"]
+	if secretAccessKeyKey == "" {
+		secretAccessKeyKey = DefaultAWSSecretAccessKeyKey
+	}
+
 	if secretName := params["awsSecretName"]; secretName != "" {
 		var err error
-		awsAccessKey, awsSecretKey, err = m.getAWSCredentialsFromSecret(ctx, secretName)
+		awsAccessKey, awsSecretKey, err = m.getAWSCredentialsFromSecret(ctx, secretName, accessKeyIDKey, secretAccessKeyKey)
 		if err != nil {
 			klog.Warningf("Failed to get AWS credentials from secret %s: %v", secretName, err)
 		}

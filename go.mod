@@ -1,4 +1,4 @@
-module github.com/zerofs/csi-driver-zerofs
+module github.com/sorend/csi-driver-zerofs
 
 go 1.23.0
 
