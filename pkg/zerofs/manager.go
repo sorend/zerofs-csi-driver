@@ -209,20 +209,11 @@ func (m *Manager) DeleteZerofsDeployment(ctx context.Context, volumeID string) e
 	serviceName := m.GetServiceName(volumeID)
 	secretName := m.GetSecretName(volumeID)
 
-	// Delete S3 data before removing Kubernetes resources so that we can still
-	// read the stored storageURL and AWS credential annotations from the Deployment.
-	// deleteS3Data returns nil immediately if the Deployment is already gone, which
-	// makes the whole function idempotent.
-	if err := m.deleteS3Data(ctx, volumeID); err != nil {
-		// Log but do not block deletion of the Kubernetes resources.
-		klog.Warningf("Failed to delete S3 data for volume %s: %v", volumeID, err)
-	}
-
-	// Scale the Deployment to 0 replicas before deleting it so that the ZeroFS
-	// server pod gets a graceful shutdown window.  Active NFS/9P clients will see
-	// their connections closed cleanly rather than the pod disappearing mid-request.
-	// We wait up to 30 seconds for the pods to terminate; if the wait times out we
-	// log a warning and proceed anyway so that deletion is never blocked permanently.
+	// Scale the Deployment to 0 replicas first so that the ZeroFS server pod
+	// gets a graceful shutdown window.  Active NFS/9P clients will see their
+	// connections closed cleanly rather than the pod disappearing mid-request.
+	// We wait up to 30 seconds for the pods to terminate; if the wait times out
+	// we log a warning and proceed anyway so that deletion is never blocked permanently.
 	if err := m.scaleDeploymentToZero(ctx, deploymentName); err != nil {
 		// Non-fatal: the Deployment may already be gone or the scale may fail for
 		// a transient reason.  We still carry on with the delete.
@@ -231,6 +222,19 @@ func (m *Manager) DeleteZerofsDeployment(ctx context.Context, volumeID string) e
 		if err := m.waitForPodsGone(ctx, volumeID, 30*time.Second); err != nil {
 			klog.Warningf("Timed out waiting for pods of volume %s to terminate; proceeding with deletion: %v", volumeID, err)
 		}
+	}
+
+	// Delete S3 data only after the pod has fully terminated.  The ZeroFS server
+	// flushes its manifest and metadata back to S3 on shutdown; deleting S3
+	// objects while the pod is still running would allow the pod to re-write the
+	// manifest after the cleanup, leaving it behind permanently.
+	// The Deployment object (and its storageURL / credential annotations) is still
+	// present here, so deleteS3Data can read everything it needs.
+	// deleteS3Data returns nil immediately if the Deployment is already gone, which
+	// makes the whole function idempotent.
+	if err := m.deleteS3Data(ctx, volumeID); err != nil {
+		// Log but do not block deletion of the Kubernetes resources.
+		klog.Warningf("Failed to delete S3 data for volume %s: %v", volumeID, err)
 	}
 
 	err := m.k8sClient.CoreV1().Services(m.namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})

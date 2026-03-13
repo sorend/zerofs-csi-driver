@@ -211,7 +211,7 @@ spec:
               memory: 20Mi
         - name: zerofs-plugin
           image: ghcr.io/sorend/csi-driver-zerofs:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - controller
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -314,7 +314,7 @@ spec:
               memory: 20Mi
         - name: zerofs-plugin
           image: ghcr.io/sorend/csi-driver-zerofs:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - node
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -371,4 +371,3 @@ type: Opaque
 stringData:
   awsAccessKeyID: "minioadmin"
   awsSecretAccessKey: "minioadmin123"
-
