@@ -4,7 +4,7 @@
   <img src="docs/logo.svg" alt="ZeroFS Logo" width="180"/>
 </p>
 
-> **Work in progress.** Vibe coded, not for production use.
+> **Work in progress.** Vibe coded, currently being tested since 3 months, but probably not for production use.
 
 A Kubernetes CSI driver that provides persistent storage backed by S3-compatible object storage via [ZeroFS](https://github.com/barre/zerofs). Volumes are served over NFS (ReadWriteMany) or 9P (ReadWriteOnce).
 
@@ -76,6 +76,10 @@ Credentials must come from a Secret (raw keys in parameters are ignored).
 kubectl delete -f https://raw.githubusercontent.com/sorend/csi-driver-zerofs/main/deploy/storageclasses.yaml
 kubectl delete -f https://raw.githubusercontent.com/sorend/csi-driver-zerofs/main/deploy/install.yaml
 ```
+
+## Releases
+
+Tagged releases are published to GHCR with GoReleaser. Pushing a `v*` tag publishes the multi-arch image to `ghcr.io/sorend/csi-driver-zerofs:<tag>` and updates `ghcr.io/sorend/csi-driver-zerofs:latest`.
 
 ## License
 
