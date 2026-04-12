@@ -54,22 +54,17 @@ jobs:
           load: true
           tags: ghcr.io/${{ github.repository }}:latest
 
-      - name: Install kind
-        run: |
-          curl -Lo /usr/local/bin/kind \
-            "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64"
-          chmod +x /usr/local/bin/kind
+      - name: Set up kind
+        uses: helm/kind-action@v1
+        with:
+          version: v0.24.0
+          cluster_name: zerofs-integration
+          config: test/kind-config.yaml
+          wait: 60s
 
       - name: Install bats
         run: |
           sudo apt-get install -y bats
-
-      - name: Create kind cluster
-        run: |
-          kind create cluster \
-            --name zerofs-integration \
-            --config test/kind-config.yaml \
-            --wait 60s
 
       - name: Load CSI driver image into kind
         run: |
@@ -139,8 +134,3 @@ jobs:
           kubectl get pods -A || true
           echo "=== Deployments in zerofs-csi ==="
           kubectl get deployments -n zerofs-csi || true
-
-      - name: Delete kind cluster
-        if: always()
-        run: |
-          kind delete cluster --name zerofs-integration
