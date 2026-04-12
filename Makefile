@@ -8,6 +8,8 @@ LDFLAGS ?= -s -w -extldflags "-static"
 GOOS ?= linux
 GOARCH ?= $(shell go env GOARCH)
 GORELEASER ?= goreleaser
+GORELEASER_IMAGE ?= goreleaser/goreleaser:latest
+GORELEASER_RUN = sh -ec 'if command -v "$(GORELEASER)" >/dev/null 2>&1; then exec "$(GORELEASER)" "$$@"; fi; exec docker run --rm -v "$(CURDIR):/workspace" -w /workspace -e GITHUB_REPOSITORY="$$GITHUB_REPOSITORY" -e GITHUB_TOKEN "$(GORELEASER_IMAGE)" "$$@"' --
 
 all: build
 
@@ -54,13 +56,13 @@ docker-build-push:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) --push .
 
 release-check:
-	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) check
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER_RUN) check
 
 release-snapshot:
-	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) release --snapshot --clean --skip=publish
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER_RUN) release --snapshot --clean --skip=publish
 
 release:
-	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) release --clean
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER_RUN) release --clean
 
 install:
 	kubectl apply -f deploy/install.yaml
