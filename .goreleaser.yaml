@@ -5,11 +5,12 @@ project_name: csi-driver-zerofs
 release:
   prerelease: auto
   extra_files:
-    - glob: dist/manifests/*.yaml
+    - glob: .goreleaser-extra/manifests/*.yaml
 
 before:
   hooks:
-    - make render-manifests VERSION=v{{ .Version }} MANIFEST_OUTPUT_DIR=dist/manifests
+    - rm -rf .goreleaser-extra/manifests
+    - make render-manifests VERSION=v{{ .Version }} MANIFEST_OUTPUT_DIR=.goreleaser-extra/manifests
 
 changelog:
   disable: true
