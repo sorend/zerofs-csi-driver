@@ -1,5 +1,7 @@
 FROM debian:trixie-slim
 
+LABEL org.opencontainers.image.source=https://github.com/sorend/csi-driver-zerofs
+
 ARG TARGETPLATFORM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
