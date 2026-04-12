@@ -1,0 +1,63 @@
+version: 2
+
+project_name: csi-driver-zerofs
+
+release:
+  disable: true
+
+changelog:
+  disable: true
+
+builds:
+  - id: csi-driver-zerofs
+    main: ./cmd/csi-driver-zerofs
+    binary: csi-driver-zerofs
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -extldflags "-static"
+
+dockers:
+  - ids:
+      - csi-driver-zerofs
+    goarch: amd64
+    use: buildx
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
+    build_flag_templates:
+      - --platform=linux/amd64
+      - --pull
+      - --label=org.opencontainers.image.created={{ .Date }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.version={{ .Tag }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}
+  - ids:
+      - csi-driver-zerofs
+    goarch: arm64
+    use: buildx
+    dockerfile: Dockerfile.goreleaser
+    image_templates:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64
+    build_flag_templates:
+      - --platform=linux/arm64
+      - --pull
+      - --label=org.opencontainers.image.created={{ .Date }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.version={{ .Tag }}
+      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}
+
+docker_manifests:
+  - name_template: ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}
+    image_templates:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64
+  - name_template: ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest
+    image_templates:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64

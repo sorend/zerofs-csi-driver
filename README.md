@@ -77,6 +77,10 @@ kubectl delete -f https://raw.githubusercontent.com/sorend/csi-driver-zerofs/mai
 kubectl delete -f https://raw.githubusercontent.com/sorend/csi-driver-zerofs/main/deploy/install.yaml
 ```
 
+## Releases
+
+Tagged releases are published to GHCR with GoReleaser. Pushing a `v*` tag publishes the multi-arch image to `ghcr.io/sorend/csi-driver-zerofs:<tag>` and updates `ghcr.io/sorend/csi-driver-zerofs:latest`.
+
 ## License
 
 Apache License 2.0

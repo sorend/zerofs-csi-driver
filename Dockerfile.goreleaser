@@ -1,0 +1,16 @@
+FROM debian:trixie-slim
+
+ARG TARGETPLATFORM
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    nfs-common \
+    e2fsprogs \
+    xfsprogs \
+    util-linux \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY $TARGETPLATFORM/csi-driver-zerofs /usr/local/bin/csi-driver-zerofs
+RUN chmod +x /usr/local/bin/csi-driver-zerofs
+
+ENTRYPOINT ["/usr/local/bin/csi-driver-zerofs"]

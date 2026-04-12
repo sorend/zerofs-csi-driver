@@ -1,11 +1,13 @@
-.PHONY: all build test clean docker-build docker-push install lint fmt vet
+.PHONY: all build test clean docker-build docker-push install lint fmt vet release release-snapshot release-check
 
 REGISTRY ?= ghcr.io/sorend
 IMAGE_NAME ?= csi-driver-zerofs
 TAG ?= latest
+GITHUB_REPOSITORY ?= sorend/csi-driver-zerofs
 LDFLAGS ?= -s -w -extldflags "-static"
 GOOS ?= linux
 GOARCH ?= $(shell go env GOARCH)
+GORELEASER ?= goreleaser
 
 all: build
 
@@ -51,6 +53,15 @@ docker-push:
 docker-build-push:
 	docker buildx build --platform linux/amd64,linux/arm64 -t $(REGISTRY)/$(IMAGE_NAME):$(TAG) --push .
 
+release-check:
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) check
+
+release-snapshot:
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) release --snapshot --clean --skip=publish
+
+release:
+	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER) release --clean
+
 install:
 	kubectl apply -f deploy/install.yaml
 
@@ -71,5 +82,8 @@ help:
 	@echo "  docker-build-all  - Build multi-arch Docker images (amd64, arm64)"
 	@echo "  docker-push       - Push Docker image to registry"
 	@echo "  docker-build-push - Build and push multi-arch Docker image"
+	@echo "  release-check     - Validate the GoReleaser configuration"
+	@echo "  release-snapshot  - Build a local GoReleaser snapshot without publishing"
+	@echo "  release           - Publish the tagged container release with GoReleaser"
 	@echo "  install           - Install CSI driver to Kubernetes"
 	@echo "  uninstall         - Uninstall CSI driver from Kubernetes"
