@@ -82,6 +82,14 @@ jobs:
         run: |
           kubectl apply -f deploy/install.yaml
           kubectl apply -f deploy/storageclasses.yaml
+          kubectl patch deployment zerofs-csi-controller \
+            -n zerofs-csi \
+            --type=strategic \
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"zerofs-plugin","imagePullPolicy":"Never"}]}}}}'
+          kubectl patch daemonset zerofs-csi-node \
+            -n zerofs-csi \
+            --type=strategic \
+            -p '{"spec":{"template":{"spec":{"containers":[{"name":"zerofs-plugin","imagePullPolicy":"Never"}]}}}}'
           kubectl rollout status deployment/zerofs-csi-controller \
             -n zerofs-csi --timeout=120s
           kubectl rollout status daemonset/zerofs-csi-node \
