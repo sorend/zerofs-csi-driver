@@ -1,9 +1,11 @@
-.PHONY: all build test clean docker-build docker-push install lint fmt vet release release-snapshot release-check
+.PHONY: all build test clean docker-build docker-push install lint fmt vet release release-snapshot release-check render-manifests
 
 REGISTRY ?= ghcr.io/sorend
 IMAGE_NAME ?= csi-driver-zerofs
 TAG ?= latest
+VERSION ?= $(TAG)
 GITHUB_REPOSITORY ?= sorend/csi-driver-zerofs
+MANIFEST_OUTPUT_DIR ?= deploy
 LDFLAGS ?= -s -w -extldflags "-static"
 GOOS ?= linux
 GOARCH ?= $(shell go env GOARCH)
@@ -58,6 +60,9 @@ docker-build-push:
 release-check:
 	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER_RUN) check
 
+render-manifests:
+	./scripts/render-manifests.sh "$(VERSION)" "$(MANIFEST_OUTPUT_DIR)"
+
 release-snapshot:
 	GITHUB_REPOSITORY=$(GITHUB_REPOSITORY) $(GORELEASER_RUN) release --snapshot --clean --skip=publish
 
@@ -85,6 +90,7 @@ help:
 	@echo "  docker-push       - Push Docker image to registry"
 	@echo "  docker-build-push - Build and push multi-arch Docker image"
 	@echo "  release-check     - Validate the GoReleaser configuration"
+	@echo "  render-manifests  - Render deploy manifests with VERSION into MANIFEST_OUTPUT_DIR"
 	@echo "  release-snapshot  - Build a local GoReleaser snapshot without publishing"
 	@echo "  release           - Publish the tagged container release with GoReleaser"
 	@echo "  install           - Install CSI driver to Kubernetes"

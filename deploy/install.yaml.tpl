@@ -1,0 +1,373 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zerofs-csi-controller
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: controller
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zerofs-csi-node
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: node
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zerofs-csi-controller
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: controller
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["get", "list"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: zerofs-csi-node
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: node
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zerofs-csi-controller
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zerofs-csi-controller
+subjects:
+  - kind: ServiceAccount
+    name: zerofs-csi-controller
+    namespace: zerofs-csi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: zerofs-csi-node
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: node
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: zerofs-csi-node
+subjects:
+  - kind: ServiceAccount
+    name: zerofs-csi-node
+    namespace: zerofs-csi
+---
+kind: CSIDriver
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: zerofs.csi.sorend.github.com
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  fsGroupPolicy: File
+  volumeLifecycleModes:
+    - Persistent
+  tokenRequests:
+    - audience: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zerofs-csi-controller
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: csi-driver-zerofs
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: csi-driver-zerofs
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: zerofs-csi-controller
+      priorityClassName: system-cluster-critical
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: csi-provisioner
+          image: registry.k8s.io/sig-storage/csi-provisioner:v5.1.0
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--leader-election"
+            - "--leader-election-namespace=zerofs-csi"
+            - "--extra-create-metadata=true"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              cpu: 200m
+              memory: 200Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: liveness-probe
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--probe-timeout=3s"
+            - "--http-endpoint=0.0.0.0:9808"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: zerofs-plugin
+          image: __CSI_DRIVER_IMAGE__
+          imagePullPolicy: Always
+          args:
+            - controller
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--namespace=zerofs-csi"
+            - "--zerofs-image=ghcr.io/barre/zerofs:1.0.4"
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: zerofs-csi-node
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: node
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: csi-driver-zerofs
+      app.kubernetes.io/component: node
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: csi-driver-zerofs
+        app.kubernetes.io/component: node
+    spec:
+      serviceAccountName: zerofs-csi-node
+      priorityClassName: system-node-critical
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: "Exists"
+      containers:
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
+            - "--health-port=9809"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/zerofs.csi.sorend.github.com/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+          ports:
+            - name: healthz
+              containerPort: 9809
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 200m
+              memory: 200Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: liveness-probe
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.14.0
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--probe-timeout=3s"
+            - "--http-endpoint=0.0.0.0:9808"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 10m
+              memory: 20Mi
+        - name: zerofs-plugin
+          image: __CSI_DRIVER_IMAGE__
+          imagePullPolicy: Always
+          args:
+            - node
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--node-id=$(KUBE_NODE_NAME)"
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: kubelet-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/zerofs.csi.sorend.github.com
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: kubelet-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: zerofs-aws-credentials
+  namespace: zerofs-csi
+  labels:
+    app.kubernetes.io/name: csi-driver-zerofs
+    app.kubernetes.io/component: credentials
+type: Opaque
+stringData:
+  awsAccessKeyID: "minioadmin"
+  awsSecretAccessKey: "minioadmin123"
