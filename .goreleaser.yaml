@@ -22,42 +22,22 @@ builds:
     ldflags:
       - -s -w -extldflags "-static"
 
-dockers:
+dockers_v2:
   - ids:
       - csi-driver-zerofs
-    goarch: amd64
-    use: buildx
     dockerfile: Dockerfile.goreleaser
-    image_templates:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
-    build_flag_templates:
-      - --platform=linux/amd64
+    images:
+      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    labels:
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Tag }}"
+      org.opencontainers.image.source: https://github.com/{{ .Env.GITHUB_REPOSITORY }}
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    flags:
       - --pull
-      - --label=org.opencontainers.image.created={{ .Date }}
-      - --label=org.opencontainers.image.revision={{ .FullCommit }}
-      - --label=org.opencontainers.image.version={{ .Tag }}
-      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}
-  - ids:
-      - csi-driver-zerofs
-    goarch: arm64
-    use: buildx
-    dockerfile: Dockerfile.goreleaser
-    image_templates:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64
-    build_flag_templates:
-      - --platform=linux/arm64
-      - --pull
-      - --label=org.opencontainers.image.created={{ .Date }}
-      - --label=org.opencontainers.image.revision={{ .FullCommit }}
-      - --label=org.opencontainers.image.version={{ .Tag }}
-      - --label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}
-
-docker_manifests:
-  - name_template: ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}
-    image_templates:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64
-  - name_template: ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest
-    image_templates:
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-amd64
-      - ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Tag }}-arm64
